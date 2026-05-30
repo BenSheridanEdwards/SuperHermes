@@ -1,0 +1,143 @@
+# ============================================================================
+# Agent repository .gitignore — SuperHermes normalised standard.
+#
+# MODEL: default-deny. The first rule ignores everything; the repo then
+# re-includes ONLY the agent's durable identity — config, soul, memory, skills,
+# scripts, crons, sandbox profile, and operating docs. Everything else stays out
+# by construction: secrets, caches, logs, sessions, the Honcho Docker stack, the
+# GBrain pglite store, isolated runtime homes, knowledge vaults, and third-party
+# workspace clones. A brand-new kind of secret file CANNOT leak — if it isn't on
+# the allow-list, it is ignored.
+#
+# This file is NORMALISED across the fleet (every agent follows this standard)
+# but NOT CENTRALISED — each agent keeps its own copy at its root. Slug below is
+# the only per-agent value. Regenerate from SuperHermes/templates/gitignore.tmpl.
+#   agent slug: __AGENT_SLUG__
+# ============================================================================
+
+# ── 0. Deny everything by default ───────────────────────────────────────────
+*
+
+# ── 1. Repo control + top-level operating docs ──────────────────────────────
+!/.gitignore
+!/README.md
+!/docs/
+!/docs/**
+!/memory/
+!/memory/**
+!/ops/
+!/ops/**
+!/workspace-index/
+!/workspace-index/**
+
+# ── 2. The Hermes profile — curated identity subset only ────────────────────
+# Re-include each ancestor directory so git can descend, then the specific
+# durable artifacts within. (Default-deny means every parent must be re-opened.)
+!/.hermes/
+!/.hermes/SOUL.md
+!/.hermes/sandbox/
+!/.hermes/sandbox/__AGENT_SLUG__.sb
+!/.hermes/profiles/
+!/.hermes/profiles/__AGENT_SLUG__/
+!/.hermes/profiles/__AGENT_SLUG__/config.yaml
+!/.hermes/profiles/__AGENT_SLUG__/honcho.json
+!/.hermes/profiles/__AGENT_SLUG__/repos.yaml
+!/.hermes/profiles/__AGENT_SLUG__/SOUL.md
+!/.hermes/profiles/__AGENT_SLUG__/memories/
+!/.hermes/profiles/__AGENT_SLUG__/memories/*.md
+!/.hermes/profiles/__AGENT_SLUG__/cron/
+!/.hermes/profiles/__AGENT_SLUG__/cron/jobs.json
+!/.hermes/profiles/__AGENT_SLUG__/scripts/
+!/.hermes/profiles/__AGENT_SLUG__/scripts/**
+# NOTE: profiles/<slug>/skills/ is deliberately NOT tracked. Skills are SHARED
+# procedural memory — they live once in the shared skills library (referenced via
+# config `skills.external_dirs`), not duplicated into every agent's identity repo
+# (that tree is 600-900 files). If an agent authors a genuinely bespoke skill it
+# wants versioned, allow-list that one path explicitly below.
+
+# ── 3. Belt-and-suspenders: never track these even inside allowed trees ──────
+# (Last-match-wins: these come AFTER the allow-list so they always win.)
+# Secrets / credentials
+**/.env
+**/.env.*
+**/auth.json
+**/*google_token*
+**/*token*
+**/*credential*
+**/*secret*
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx
+**/*.kdbx
+**/*.age
+**/id_rsa*
+**/id_ed25519*
+**/*.git-credentials
+# Runtime state / locks / sessions / logs
+**/logs/
+**/sessions/
+**/cron/output/
+**/*.lock
+**/*.pid
+**/*.log
+**/*.jsonl
+**/gateway_state.json
+**/processes.json
+**/.usage.json*
+**/.curator_state
+**/.curator_backups/
+**/.hub/
+**/.archive/
+# Memory/model binary stores (durable text lives in memories/*.md + vault, which
+# is its own repo) — never the binary indexes
+**/*.pglite
+**/*.sqlite
+**/*.sqlite3
+**/*.db
+**/*.db-*
+**/*.wal
+**/*.shm
+**/localmem_chroma/
+**/chroma*/
+**/*.gguf
+**/*.safetensors
+**/*.pt
+**/*.pth
+**/*.onnx
+**/*.bin
+# Caches / build / deps
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+**/node_modules/
+**/.venv/
+**/vendor/
+# Generated media / archives
+**/*.png
+**/*.jpg
+**/*.jpeg
+**/*.gif
+**/*.webp
+**/*.mp4
+**/*.mov
+**/*.ogg
+**/*.mp3
+**/*.wav
+**/*.pdf
+**/*.zip
+**/*.tar
+**/*.tar.gz
+**/.DS_Store
+*.bak*
+
+# ── 4. Big trees that never belong in the identity repo (clarity; already
+#       covered by default-deny since they were never re-included) ───────────
+# /.hermes/honcho/   Honcho Docker stack (cloned upstream, multi-GB)
+# /.hermes/backups/  database dumps
+# /.home/ /.cache/ /.npm/ /.local/ /.ollama/ /tmp/   isolated runtime + caches
+# /vault/            knowledge vault — its OWN git repo, kept separate
+# /workspace/        working area + third-party clones — never the agent identity
