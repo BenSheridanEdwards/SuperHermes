@@ -267,6 +267,16 @@ elif [ "$START" = "yes" ]; then
   { command -v docker >/dev/null && docker info >/dev/null 2>&1; } || die "Docker not running — start it or rerun --no-start"
   [ -d "$HONCHO_DIR/honcho/.git" ] || { say "cloning Honcho…"; git clone --depth 1 https://github.com/plastic-labs/honcho.git "$HONCHO_DIR/.src"; cp -R "$HONCHO_DIR/.src/." "$HONCHO_DIR/honcho/"; rm -rf "$HONCHO_DIR/.src"; }
   ( cd "$HONCHO_DIR/honcho" && docker compose -p "$PROJECT" up -d --build )
+  # Honcho's DB inits pgvector at 1536, but validates against EMBEDDING_VECTOR_DIMENSIONS
+  # (768 for nomic) and refuses to start until they match. The first api boot runs the
+  # migrations that create the table; retry the reshape until it lands, then restart.
+  say "reshaping pgvector embeddings → 768…"
+  for i in $(seq 1 15); do
+    ( cd "$HONCHO_DIR/honcho" && docker compose -p "$PROJECT" run --rm --entrypoint /app/.venv/bin/python api scripts/configure_embeddings.py --yes ) >/dev/null 2>&1 \
+      && { ok "pgvector reshaped to 768"; break; }
+    sleep 4
+  done
+  ( cd "$HONCHO_DIR/honcho" && docker compose -p "$PROJECT" up -d )
   for i in $(seq 1 30); do curl -fsS "http://127.0.0.1:$API_PORT/health" >/dev/null 2>&1 && break; sleep 2; done
   curl -fsS "http://127.0.0.1:$API_PORT/health" >/dev/null 2>&1 && ok "honcho api healthy ($API_PORT)" || say "⚠ api not healthy — check: docker compose -p $PROJECT logs"
   # GBrain: install the real v0.41 runtime (profile-isolated) + seed from vault/brain
