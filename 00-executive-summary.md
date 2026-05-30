@@ -33,9 +33,12 @@ Jeeves is the first worked example:
 - Profile `jeeves`.
 - Model `gpt-5.5` via `openai-codex`.
 - Honcho active.
-- GBrain active as semantic/wiki brain.
-- GBrain MCP registered via `$AGENTS_ROOT/Shared/bin/gbrain serve`.
-- GBrain stats at capture: 14 pages, 19 chunks, 19 embedded, 100% embedding coverage.
+- GBrain active as semantic/wiki brain (v0.41 pglite, profile-isolated).
+- GBrain MCP registered via the agent's **own** `<agent>/.local/bin/gbrain`
+  wrapper — never a shared one (see non-negotiables and `05-gbrain-setup`). A
+  cross-agent shared wrapper was the original split-brain/dependency failure the
+  template exists to prevent.
+- GBrain stats at an early capture: 14 pages, 19 chunks, 19 embedded, 100% embedding coverage.
 - Daily memory hygiene and GBrain consolidation crons active.
 - Google Workspace, meeting, Kanban, voice, and delivery modules present.
 

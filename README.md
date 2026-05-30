@@ -119,8 +119,19 @@ A `launchd` job runs `sandbox-exec -f <agent>.sb … hermes_cli … gateway run`
   - `config.json`, the MCP command, and the CLI wrapper **all resolve to one
     store** — this is what prevents the classic CLI↔MCP split-brain.
 
-A daily **consolidation** cron distils sessions into curated GBrain pages; a daily
-**hygiene** cron scans both layers for poison and staleness. New agents get both.
+Two daily baseline crons keep memory and identity durable:
+
+- **Memory maintenance** — one snapshot-fed LLM run. A read-only
+  `memory_health_snapshot` script injects *real* vault/GBrain/Honcho numbers as
+  context, then the agent **consolidates** — distils recent sessions *and*
+  **harvests Honcho's durable distillate** (peer card → `honcho_search` →
+  optional dialectic synthesis) into the right *topical* GBrain pages,
+  idempotently (read-before-write, never dated dumps) — and runs **hygiene**
+  (scans both layers for poison, staleness, and CLI↔MCP split-brain).
+- **Identity git-sync** (runs just after) — a deterministic `no_agent` backup
+  that commits the agent's durable identity to its own git repo behind a secret
+  tripwire. Kept *separate* from the LLM run on purpose: the backup must be the
+  one thing that always works, even on a day the maintenance run fails.
 
 ### 5. Skills — shared procedural memory
 Repeatable workflows live once in a shared skills library; every agent's
@@ -163,6 +174,12 @@ An agent is "ideal" only if **all** of these hold:
    purchases, deletions, credential changes).
 6. **Every layer independently verifiable** — Honcho `/health`, `gbrain stats` /
    `health` (100% embed coverage), sandbox compiles, plist lints, config parses.
+7. **Each agent its own git repo** at its root, with a normalised default-deny
+   `.gitignore` — only durable identity versioned; never secrets, caches, the
+   Honcho stack, the GBrain store, the vault, or workspace clones.
+
+`bin/verify-fleet` asserts all of these across a live fleet in one pass; the
+`tests/` suite locks down the shipping scripts.
 
 ---
 
@@ -176,20 +193,47 @@ bin/new-agent --name Sky --no-start                 # scaffold files only
 
 The phases: directory skeleton → town-square sandbox (compile-checked) → Hermes
 profile (`config.yaml`, `honcho.json`, **SOUL seed**, MEMORY/USER, **`.env` secret
-keys**, **cron jobs**) → GBrain (own v0.41 runtime + wrapper + pglite) → Honcho
-stack (compose + `.env` + backup, ports auto-allocated) → launchd plists →
-permissions → services (Honcho up, GBrain installed + vault imported + embedded,
-gateway started).
+keys**, **memory-maintenance + git-sync crons** (+ their scripts), **normalised root
+`.gitignore`**) → GBrain (own v0.41 runtime
++ wrapper + pglite) → Honcho stack (compose + `.env` + backup, ports auto-allocated)
+→ launchd plists → **permissions + `git init`** (the agent's own repo at its root)
+→ services (Honcho up, GBrain installed + vault imported + embedded, gateway started).
+
+Each agent is its **own git repo, rooted at `AGENTS_ROOT/<Name>/`**, with a
+**normalised** (not centralised) default-deny `.gitignore`: every agent follows
+the same standard, each keeps its own copy. Only the durable identity is versioned
+— config, soul, memory, crons, scripts, sandbox profile, README — never secrets,
+caches, the Honcho stack, the GBrain store, the knowledge vault (its own repo), or
+workspace clones. A new kind of secret file *cannot* leak: if it isn't allow-listed,
+it's ignored.
 
 **What it can't autogenerate** (it scaffolds the structure and pauses for the
 values): **secrets** (`<profile>/.env` — Telegram token from
 [@BotFather](https://t.me/botfather), etc.), **credentials** (`auth.json`), and the
 agent's **`SOUL.md`** persona.
 
+## Verify & test
+
+Two guards keep the framework honest — most real-world breakage is config /
+cross-reference drift, not logic bugs, so both are cheap and high-leverage:
+
+```sh
+bin/verify-fleet            # assert invariants across every agent (no-LLM, exit 1 on FAIL)
+bash tests/run-tests.sh     # unit-test the shipping scripts (gitignore, git-sync, scaffolder)
+```
+
+`verify-fleet` checks: cron scripts all exist · no stale shared-wrapper or
+retired-system refs · no secrets/bloat tracked in git · normalised `.gitignore` ·
+profile-isolated GBrain · consistent config versions · baseline crons present.
+Run it after any change, and ideally on a daily cron — it's the "diagnose" half of
+fleet ops.
+
 ## On-disk layout
 
 ```
-AGENTS_ROOT/<Name>/
+AGENTS_ROOT/<Name>/                    ← the agent's own git repo root
+├── .git/  .gitignore                  normalised default-deny ignore (own copy)
+├── README.md                          agent identity readme (tracked at root)
 ├── .hermes/
 │   ├── sandbox/<slug>.sb              town-square profile
 │   ├── profiles/<slug>/
@@ -198,7 +242,7 @@ AGENTS_ROOT/<Name>/
 │   │   ├── SOUL.md                   identity (the one personal file)
 │   │   ├── .env                      secret KEYS (Telegram/GitHub/Google; gitignored)
 │   │   ├── auth.json                 credentials (never committed)
-│   │   ├── cron/jobs.json            daily consolidation + memory hygiene
+│   │   ├── cron/jobs.json            daily memory-maintenance + identity git-sync
 │   │   ├── home/.gbrain/             canonical pglite store + config.json
 │   │   └── memories/{MEMORY,USER}.md bootstrap memory
 │   └── honcho/honcho/                Dockerized memory stack
