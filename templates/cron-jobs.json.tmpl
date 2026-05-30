@@ -1,0 +1,21 @@
+{
+  "jobs": [
+    {
+      "id": "__CONS_ID__",
+      "name": "Daily GBrain consolidation",
+      "prompt": "You are __AGENT_NAME__ running your daily memory consolidation. Review recent sessions, Honcho outputs, and cron outputs. Distil ONLY durable facts into curated GBrain pages under vault/brain/ (people, projects, tech, guides, daily, etc.). Reject secrets, raw transcripts, stale task artifacts (PR numbers, SHAs), and facts Honcho already holds. Import + embed (gbrain import vault/brain --no-embed; gbrain embed --stale), then verify with gbrain stats/search. Update MEMORY.md/USER.md only for critical always-loaded facts. Report what you wrote and what you rejected, with evidence.",
+      "skill": "memory-architecture",
+      "schedule": { "kind": "cron", "expr": "0 21 * * *", "display": "21:00 daily" },
+      "enabled": true
+    },
+    {
+      "id": "__HYG_ID__",
+      "name": "Daily memory hygiene — Honcho/GBrain poison check",
+      "prompt": "You are __AGENT_NAME__ running your daily memory hygiene check. Scan Honcho + GBrain for poison/staleness classes: wrong employer/client identity, misspelled personal emails, inferred birthdays/ages, brittle unverified meeting times, obsolete architecture/ownership assumptions. Correct only durable, high-confidence facts; reject or flag the rest for human review. Confirm GBrain remains the canonical brain and retrieval works. Report green/amber/red, what changed, what was rejected, with evidence.",
+      "skill": "memory-architecture",
+      "schedule": { "kind": "cron", "expr": "0 22 * * *", "display": "22:00 daily" },
+      "enabled": true
+    }
+  ],
+  "updated_at": "__NOW__"
+}

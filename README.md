@@ -137,8 +137,10 @@ Hermes profile (`config.yaml`, `honcho.json`, SOUL stub, MEMORY/USER) → GBrain
 backup, ports auto-allocated) → launchd plists → permissions → services
 (Honcho up, GBrain installed + vault imported + embedded, gateway started).
 
-**Two things it can't autogenerate** (it pauses for them): credentials
-(`auth.json`) and the agent's `SOUL.md` persona.
+**What it can't autogenerate** (it scaffolds the structure + pauses for the values):
+**secrets** — `<profile>/.env` carries the keys (`TELEGRAM_BOT_TOKEN` from
+[@BotFather](https://t.me/botfather), GitHub/Google), filled by paste or a secrets
+manager — plus credentials (`auth.json`) and the agent's `SOUL.md` persona.
 
 ## On-disk layout
 
@@ -150,7 +152,9 @@ AGENTS_ROOT/<Name>/
 │   │   ├── config.yaml               provider, memory, skills, mcp_servers.gbrain
 │   │   ├── honcho.json               Honcho wiring (own port/workspace)
 │   │   ├── SOUL.md                   identity (the one personal file)
+│   │   ├── .env                      secret KEYS (Telegram/GitHub/Google; gitignored)
 │   │   ├── auth.json                 credentials (never committed)
+│   │   ├── cron/jobs.json            daily consolidation + memory hygiene
 │   │   ├── home/.gbrain/             canonical pglite store + config.json
 │   │   └── memories/{MEMORY,USER}.md bootstrap memory
 │   └── honcho/honcho/                Dockerized memory stack

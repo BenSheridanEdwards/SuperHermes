@@ -81,10 +81,18 @@ and safety point the same way.
 
 ### 9. No secrets in the repo
 **Decision.** Credentials, tokens, and machine-specific paths live only in the
-gitignored local config or the agent's own profile — never in a committed file.
+gitignored local config or the agent's own profile (`.env`) — never in a committed
+file. *Where* those values come from is **pluggable**: paste into `.env`, or source
+them from a secrets manager via Hermes's `secrets:` config (BitWarden Secrets
+Manager is supported natively). The framework declares the secret **keys** an agent
+needs (`TELEGRAM_BOT_TOKEN`, etc.); the backend is the operator's choice and never
+hardcoded.
 
-**Why.** The framework is meant to be shared/open-source. Secrets are recoverable;
-a leaked secret in public git history is not.
+**Why.** The framework is meant to be shared/open-source — so it can't assume any
+one secrets backend. Declaring the keys and leaving the source pluggable keeps it
+usable by a solo operator with a plain `.env` *and* by a fleet centralising on
+BitWarden, with no fork. Secrets are recoverable; a leaked secret in public git
+history is not.
 
 ### 10. Verify every layer independently — "looks set up" ≠ "works"
 **Decision.** Never report a layer healthy without its own evidence: Honcho
