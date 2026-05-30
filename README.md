@@ -61,6 +61,17 @@ place; private things live in the agent's own home. Nothing in between.
 
 ---
 
+## Scope — one agent, not a fleet manager
+
+SuperHermes builds **one excellent agent**, correct and self-contained. It is
+deliberately *not* a fleet manager — spawning agents, self-healing, a fleet
+"doctor," cross-agent orchestration all sit in a **separate layer above** the
+individual agent. Keeping that boundary clean is exactly what lets the template
+stay individual- and fleet-agnostic (and open-sourceable). The fleet layer is its
+own system.
+
+---
+
 ## Anatomy of an ideal agent
 
 ### 1. Isolation — a private home in a shared town square
