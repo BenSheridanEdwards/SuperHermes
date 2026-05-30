@@ -210,7 +210,7 @@ cat > "$LA/ai.hermes.gateway-$SLUG.plist" <<PLIST
     <key>VIRTUAL_ENV</key><string>$HERMES_VENV</string>
     <key>PATH</key><string>$HERMES_VENV/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
   </dict>
-  <key>RunAtLoad</key><true/><key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
+  <key>RunAtLoad</key><true/><key>KeepAlive</key><true/>
   <key>StandardOutPath</key><string>$PROFILE/logs/gateway.log</string>
   <key>StandardErrorPath</key><string>$PROFILE/logs/gateway.error.log</string>
 </dict></plist>
