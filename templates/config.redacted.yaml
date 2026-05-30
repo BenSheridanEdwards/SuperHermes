@@ -1,0 +1,46 @@
+# Redacted Hermes profile config template.
+# This is illustrative, not a complete config.yaml.
+
+model:
+  provider: <provider-name>
+  default: <model-name>
+  base_url: <optional-base-url>
+
+agent:
+  max_turns: 150
+  gateway_timeout: 3600
+  tool_use_enforcement: auto
+
+terminal:
+  backend: local
+  cwd: $AGENTS_ROOT/<Agent>/workspace
+  timeout: 600
+  persistent_shell: true
+
+memory:
+  memory_enabled: true
+  user_profile_enabled: true
+  provider: honcho
+  memory_char_limit: 2200
+  user_char_limit: 2500
+
+compression:
+  enabled: true
+  threshold: 0.4
+  target_ratio: 0.15
+
+approvals:
+  mode: smart
+  cron_mode: deny
+
+mcp_servers:
+  gbrain:
+    command: $AGENTS_ROOT/Shared/bin/gbrain
+    args: [serve]
+    env:
+      HERMES_HOME: $AGENTS_ROOT/<Agent>/.hermes/profiles/<profile>
+      HOME: $AGENTS_ROOT/<Agent>/.home
+    timeout: 120
+    connect_timeout: 60
+
+# Never include real API keys, OAuth tokens, cookies, passwords, or credentials here.

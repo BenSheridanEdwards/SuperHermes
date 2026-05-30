@@ -1,0 +1,61 @@
+(version 1)
+(import "system.sb")
+
+;; ============================================================================
+;; SuperHermes "town-square" sandbox for __AGENT_NAME__.
+;;
+;; Model: the shared user account is a town square. Each agent home under
+;; __AGENTS_ROOT__/<Name> is private. Agents have free reign over the account
+;; EXCEPT:
+;;   1. Other agents' homes are READ-ONLY  (look through the window, don't enter)
+;;   2. Operator-protected paths are OFF-LIMITS  (configured: PROTECTED_PATHS)
+;;   3. Optional need-to-know paths are restricted to named readers  (VAULT_*)
+;;
+;; Allow-all-then-deny (not an allowlist) so normal tooling never breaks; the OS
+;; (SIP / file permissions) still applies underneath.
+;;
+;; Rendered by `bin/new-agent` from this template. Do not hand-edit per-agent
+;; copies — change the template and re-render.
+;; ============================================================================
+
+(deny default)
+
+;; --- Runtime: full capability inside the town square ---
+(allow process*)
+(allow process-info*)
+(allow signal)
+(allow system-info)
+(allow sysctl-read)
+(allow sysctl-write)
+(system-network)
+(allow network*)
+(allow mach*)
+(allow mach-lookup)
+(allow ipc-posix-shm*)
+(allow iokit-open)
+(allow distributed-notification-post)
+
+;; Dynamic PTYs (terminal-backed tools, test runners).
+(allow file-read* file-write* file-ioctl (literal "/dev/ptmx"))
+(allow file-read* file-write* file-ioctl
+  (regex #"^/dev/ttys[0-9]*")
+  (extension "com.apple.sandbox.pty"))
+
+;; --- Reads: everything (carve-outs below) ---
+(allow file-read*)
+
+;; --- Writes: everything (carve-outs below) ---
+(allow file-write*)
+
+;; ===== Carve-out 1: other agents' homes are read-only =====
+;; Deny writes inside ANY agent home, then re-grant this agent's own home.
+;; (Reads stay allowed by the global file-read* above — the "window".)
+(deny file-write* (regex #"^__AGENTS_ROOT__/[^/]+(/|$)"))
+(allow file-write* (subpath "__AGENT_ROOT__"))
+__COMMON_RULES__
+
+;; ===== Carve-out 2: operator-protected paths (off-limits) =====
+__PROTECTED_RULES__
+
+;; ===== Carve-out 3: optional need-to-know paths =====
+__VAULT_RULES__

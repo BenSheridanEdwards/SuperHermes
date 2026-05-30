@@ -1,0 +1,240 @@
+#!/usr/bin/env bash
+# ============================================================================
+# new-agent — spin up a new SuperHermes agent from one command.
+#
+# Provisions the full anatomy (see docs 00-10): profile dirs · town-square
+# sandbox · gateway + honcho-backup launchd plists · Hermes profile
+# (config.yaml, honcho.json, SOUL stub) · Honcho Docker stack (compose + .env +
+# backup, auto-allocated ports) · GBrain config + vault · shared-skills wiring.
+# Then (default) starts services + registers launchd.
+#
+# Config: copy superhermes.conf.example → superhermes.conf and set AGENTS_ROOT.
+#
+# Usage:
+#   new-agent                                  # interactive
+#   new-agent --name Sky --camp team --tier m
+#   new-agent --name Sky --no-start            # scaffold only
+#   new-agent --name Sky --dry-run             # render to temp, no side effects
+#
+# Pauses for the two things it can't autogenerate: credentials (auth.json) and
+# the agent's SOUL/persona. (macOS / launchd / sandbox-exec required to start.)
+# ============================================================================
+set -euo pipefail
+
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+die(){ printf '\033[31merror:\033[0m %s\n' "$*" >&2; exit 1; }
+say(){ printf '\033[36m%s\033[0m\n' "$*"; }
+ok(){  printf '  \033[32m✓\033[0m %s\n' "$*"; }
+plan(){ printf '  \033[33m→\033[0m %s\n' "$*"; }
+
+# ---- config -----------------------------------------------------------------
+if [ -f "$REPO/superhermes.conf" ]; then . "$REPO/superhermes.conf"
+else say "no superhermes.conf — using example defaults (copy superhermes.conf.example to customize)"; . "$REPO/superhermes.conf.example"; fi
+: "${AGENTS_ROOT:?set AGENTS_ROOT in superhermes.conf}"
+SKILLS_DIR="${SKILLS_DIR:-}"; GBRAIN_BIN="${GBRAIN_BIN:-}"
+HERMES_VENV="${HERMES_VENV:-$HOME/.hermes/hermes-agent/venv}"
+REF_AGENT="${REF_AGENT:-}"; COMMON_DIRS="${COMMON_DIRS:-}"
+PROTECTED_PATHS="${PROTECTED_PATHS:-}"; VAULT_PATH="${VAULT_PATH:-}"; VAULT_READERS="${VAULT_READERS:-}"
+
+# render <template> : substitute __VAR__ from the environment, write to stdout.
+render(){ python3 - "$1" <<'PY'
+import os,sys,re
+t=open(sys.argv[1]).read()
+sys.stdout.write(re.sub(r"__([A-Z_]+)__", lambda m: os.environ.get(m.group(1), m.group(0)), t))
+PY
+}
+
+NAME="" CAMP="" TIER="" START="yes" DRYRUN=0
+while [ $# -gt 0 ]; do case "$1" in
+  --name) NAME="${2:-}"; shift 2;; --camp) CAMP="${2:-}"; shift 2;; --tier) TIER="${2:-}"; shift 2;;
+  --no-start) START="no"; shift;; --start) START="yes"; shift;; --dry-run) DRYRUN=1; shift;;
+  -h|--help) sed -n '2,20p' "$0"; exit 0;; *) die "unknown arg: $1";;
+esac; done
+
+ask(){ local __v="$1" __p="$2" __d="${3:-}" __r; [ -n "${!__v}" ] && return 0
+  if [ "$DRYRUN" = 1 ]; then printf -v "$__v" '%s' "$__d"; return 0; fi
+  read -r -p "$__p${__d:+ [$__d]}: " __r || true; printf -v "$__v" '%s' "${__r:-$__d}"; }
+
+# ---- collect ----------------------------------------------------------------
+say "── new-agent ──────────────────────────────────────────────"
+ask NAME "Agent name (PascalCase, e.g. Sky)" "Sky"
+[[ "$NAME" =~ ^[A-Za-z][A-Za-z0-9]*$ ]] || die "name must be alphanumeric, start with a letter"
+ask CAMP "Camp / workspace suffix (e.g. personal)" "personal"
+[[ "$CAMP" =~ ^[a-z][a-z0-9-]*$ ]] || die "camp must be lowercase alphanumeric/hyphen"
+ask TIER "Dialectic tier (s|m|l)" "m"
+[[ "$TIER" =~ ^[smlSML]$ ]] || die "tier must be s, m, or l"
+TIER="$(printf '%s' "$TIER" | tr '[:upper:]' '[:lower:]')"
+
+export AGENT_NAME="$NAME"
+export AGENT_SLUG="$(printf '%s' "$NAME" | tr '[:upper:]' '[:lower:]')"
+SLUG="$AGENT_SLUG"
+export AGENTS_ROOT
+export AGENT_ROOT="$AGENTS_ROOT/$NAME"
+export WORKSPACE="$SLUG-$CAMP" AI_PEER="$SLUG" PROJECT="honcho-$SLUG"
+PROFILE="$AGENT_ROOT/.hermes/profiles/$SLUG"; HONCHO_DIR="$AGENT_ROOT/.hermes/honcho"
+export WORKSPACE_CWD="$AGENT_ROOT/workspace" SKILLS_DIR GBRAIN_BIN
+case "$TIER" in s) export DLEVEL=minimal;; m) export DLEVEL=low;; l) export DLEVEL=medium;; esac
+LA="$HOME/Library/LaunchAgents"
+
+# ---- ports: next free triple. DB=5432+(API-8000), REDIS=6379+(API-8000) -----
+MAXAPI=$(grep -rhoE '127\.0\.0\.1:80[0-9][0-9]:8000' "$AGENTS_ROOT"/*/.hermes/honcho/honcho/docker-compose.yml 2>/dev/null \
+         | grep -oE '80[0-9][0-9]' | sort -n | tail -1)
+export API_PORT=$(( ${MAXAPI:-8000} + 1 )); export DB_PORT=$(( 5432 + API_PORT - 8000 )); export REDIS_PORT=$(( 6379 + API_PORT - 8000 ))
+
+# ---- sandbox carve-out blocks (from config) ---------------------------------
+COMMON_RULES=""; for d in $COMMON_DIRS; do COMMON_RULES+="(allow file-read* file-write* (subpath \"$d\"))"$'\n'; done
+PROTECTED_RULES=""; for p in $PROTECTED_PATHS; do PROTECTED_RULES+="(deny file* (subpath \"$p\"))"$'\n'; done
+VAULT_RULES=""
+if [ -n "$VAULT_PATH" ]; then VAULT_RULES="(deny file-read* (subpath \"$VAULT_PATH\"))"
+  for r in $VAULT_READERS; do [ "$r" = "$SLUG" ] && VAULT_RULES+=$'\n'"(allow file-read* (subpath \"$VAULT_PATH\"))"; done; fi
+export COMMON_RULES PROTECTED_RULES VAULT_RULES
+
+# ---- preflight --------------------------------------------------------------
+[ -e "$AGENT_ROOT" ] && die "agent dir already exists: $AGENT_ROOT"
+[ -f "$REPO/templates/sandbox.sb.template" ] || die "missing bundled sandbox template"
+for p in "$API_PORT" "$DB_PORT" "$REDIS_PORT"; do
+  lsof -nP -iTCP:"$p" -sTCP:LISTEN >/dev/null 2>&1 && die "port $p already in use"; done
+
+echo; say "Plan for: $NAME"
+cat <<SUMMARY
+  slug=$SLUG  camp=$CAMP  tier=$TIER (dialectic=$DLEVEL)
+  root        $AGENT_ROOT
+  workspace   $WORKSPACE   aiPeer=$AI_PEER
+  honcho      api=$API_PORT db=$DB_PORT redis=$REDIS_PORT  project=$PROJECT
+  carve-outs  protected=[${PROTECTED_PATHS:-none}]  vault=${VAULT_PATH:-none}
+  start now   $START$([ "$DRYRUN" = 1 ] && echo "   (DRY-RUN)")
+SUMMARY
+if [ "$DRYRUN" = 0 ]; then read -r -p "Proceed? [y/N] " yn; [[ "$yn" =~ ^[Yy] ]] || die "aborted"; fi
+if [ "$DRYRUN" = 1 ]; then TMP="$(mktemp -d)"; AGENT_ROOT="$TMP/$NAME"; export AGENT_ROOT
+  PROFILE="$AGENT_ROOT/.hermes/profiles/$SLUG"; HONCHO_DIR="$AGENT_ROOT/.hermes/honcho"
+  export WORKSPACE_CWD="$AGENT_ROOT/workspace"; LA="$TMP/LaunchAgents"; mkdir -p "$LA"; say "dry-run → $TMP"; fi
+
+# ---- 1. skeleton ------------------------------------------------------------
+say "1/8  directory skeleton"
+mkdir -p "$PROFILE"/{cron,scripts,logs,memories,home/.gbrain} "$AGENT_ROOT/.hermes/sandbox" \
+  "$HONCHO_DIR"/{honcho,scripts,backups} "$AGENT_ROOT/.home/.gbrain" \
+  "$AGENT_ROOT"/{.cache,.npm,.ollama,tmp,workspace} "$AGENT_ROOT/vault/research" \
+  "$AGENT_ROOT/vault/brain"/{people,projects,guides,tech,daily,companies,concepts,meetings,sources}
+ok "tree under $AGENT_ROOT"
+
+# ---- 2. sandbox -------------------------------------------------------------
+say "2/8  sandbox"
+render "$REPO/templates/sandbox.sb.template" > "$AGENT_ROOT/.hermes/sandbox/$SLUG.sb"
+if command -v sandbox-exec >/dev/null; then
+  sandbox-exec -f "$AGENT_ROOT/.hermes/sandbox/$SLUG.sb" /usr/bin/true 2>/dev/null \
+    && ok "$SLUG.sb (compiles)" || die "$SLUG.sb failed to compile"
+else plan "sandbox-exec unavailable (non-macOS) — rendered but not compile-checked"; fi
+
+# ---- 3. profile -------------------------------------------------------------
+say "3/8  Hermes profile"
+if [ -n "$REF_AGENT" ] && [ -d "$AGENTS_ROOT/$REF_AGENT" ]; then
+  rs="$(printf '%s' "$REF_AGENT" | tr '[:upper:]' '[:lower:]')"
+  sed -e "s|$AGENTS_ROOT/$REF_AGENT/|$AGENT_ROOT/|g" \
+      -e "s|command: .*/gbrain|command: ${GBRAIN_BIN:-gbrain}|" \
+      -e "s|^TELEGRAM_HOME_CHANNEL:.*|TELEGRAM_HOME_CHANNEL: ''|" \
+      "$AGENTS_ROOT/$REF_AGENT/.hermes/profiles/$rs/config.yaml" > "$PROFILE/config.yaml"
+  ok "config.yaml (cloned from $REF_AGENT, repointed, telegram cleared)"
+else
+  render "$REPO/templates/config.yaml.tmpl" > "$PROFILE/config.yaml"
+  ok "config.yaml (bundled generic template)"
+fi
+cat > "$PROFILE/honcho.json" <<JSON
+{ "baseUrl": "http://127.0.0.1:$API_PORT", "enabled": true,
+  "hosts": { "hermes.$SLUG": { "enabled": true, "workspace": "$WORKSPACE",
+    "peerName": "operator", "aiPeer": "$AI_PEER", "pinPeerName": true,
+    "saveMessages": true, "writeFrequency": "async", "recallMode": "hybrid",
+    "dialecticReasoningLevel": "$DLEVEL", "dialecticDynamic": true,
+    "dialecticMaxChars": 800, "messageMaxChars": 20000, "contextTokens": 1200,
+    "observation": true } } }
+JSON
+cat > "$PROFILE/SOUL.md" <<SOUL
+# $NAME
+
+> STUB — fill in $NAME's identity, voice, scope, and IRON LAWS before launch.
+> Hard rule: no outbound sends (email/messages/posts) without explicit approval.
+SOUL
+cp "$REPO/templates/MEMORY.template.md" "$PROFILE/memories/MEMORY.md" 2>/dev/null || true
+cp "$REPO/templates/USER.template.md"   "$PROFILE/memories/USER.md"   2>/dev/null || true
+ok "honcho.json + SOUL stub + MEMORY/USER"
+
+# ---- 4. gbrain --------------------------------------------------------------
+say "4/8  GBrain"
+cat > "$AGENT_ROOT/.home/.gbrain/config.json" <<JSON
+{ "engine": "pglite", "database_path": "$AGENT_ROOT/.home/.gbrain/brain.pglite",
+  "embedding_model": "ollama:nomic-embed-text:latest", "embedding_dimensions": 768,
+  "embedding_base_url": "http://localhost:11434" }
+JSON
+printf '# %s — GBrain\n\nKnowledge base index.\n' "$NAME" > "$AGENT_ROOT/vault/brain/HOME.md"
+ok "gbrain config + vault/brain skeleton (768-dim)"
+
+# ---- 5. honcho stack --------------------------------------------------------
+say "5/8  Honcho stack"
+render "$REPO/templates/honcho/docker-compose.yml.tmpl" > "$HONCHO_DIR/honcho/docker-compose.yml"
+render "$REPO/templates/honcho/env.tmpl"                > "$HONCHO_DIR/honcho/.env"
+render "$REPO/templates/honcho/backup.sh.tmpl" | sed "s|__HONCHO_DIR__|$HONCHO_DIR|g" > "$HONCHO_DIR/scripts/backup.sh"
+chmod +x "$HONCHO_DIR/scripts/backup.sh"
+ok "compose + .env + backup.sh ($PROJECT, ports $API_PORT/$DB_PORT/$REDIS_PORT)"
+
+# ---- 6. launchd plists ------------------------------------------------------
+say "6/8  launchd plists"
+cat > "$LA/ai.hermes.gateway-$SLUG.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>ai.hermes.gateway-$SLUG</string>
+  <key>ProgramArguments</key><array>
+    <string>/usr/bin/sandbox-exec</string><string>-f</string><string>$AGENT_ROOT/.hermes/sandbox/$SLUG.sb</string>
+    <string>$HERMES_VENV/bin/python</string><string>-m</string><string>hermes_cli.main</string>
+    <string>--profile</string><string>$SLUG</string><string>gateway</string><string>run</string><string>--replace</string>
+  </array>
+  <key>WorkingDirectory</key><string>$AGENT_ROOT/workspace</string>
+  <key>EnvironmentVariables</key><dict>
+    <key>HERMES_HOME</key><string>$PROFILE</string><key>HERMES_WRITE_SAFE_ROOT</key><string>$AGENT_ROOT</string>
+    <key>HOME</key><string>$AGENT_ROOT/.home</string><key>TMPDIR</key><string>$AGENT_ROOT/tmp</string>
+    <key>XDG_CACHE_HOME</key><string>$AGENT_ROOT/.cache</string><key>NPM_CONFIG_CACHE</key><string>$AGENT_ROOT/.npm</string>
+    <key>VIRTUAL_ENV</key><string>$HERMES_VENV</string>
+    <key>PATH</key><string>$HERMES_VENV/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+  <key>RunAtLoad</key><true/><key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
+  <key>StandardOutPath</key><string>$PROFILE/logs/gateway.log</string>
+  <key>StandardErrorPath</key><string>$PROFILE/logs/gateway.error.log</string>
+</dict></plist>
+PLIST
+cat > "$LA/ai.hermes.honcho.$SLUG.backup.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>ai.hermes.honcho.$SLUG.backup</string>
+  <key>ProgramArguments</key><array><string>$HONCHO_DIR/scripts/backup.sh</string></array>
+  <key>StartCalendarInterval</key><dict><key>Hour</key><integer>3</integer><key>Minute</key><integer>0</integer></dict>
+  <key>StandardOutPath</key><string>$HONCHO_DIR/backups/launchd.out.log</string>
+  <key>StandardErrorPath</key><string>$HONCHO_DIR/backups/launchd.err.log</string>
+  <key>WorkingDirectory</key><string>$HONCHO_DIR</string>
+</dict></plist>
+PLIST
+if command -v plutil >/dev/null; then plutil -lint "$LA/ai.hermes.gateway-$SLUG.plist" >/dev/null && ok "gateway + backup plists (lint clean)"; else ok "plists written"; fi
+
+# ---- 7. perms ---------------------------------------------------------------
+say "7/8  permissions"; find "$AGENT_ROOT" -type d -exec chmod 750 {} + 2>/dev/null || true; ok "dirs 750"
+
+# ---- 8. services ------------------------------------------------------------
+say "8/8  services"
+if [ "$DRYRUN" = 1 ]; then
+  plan "clone Honcho, docker compose -p $PROJECT up -d --build, configure embeddings, health-gate :$API_PORT"
+  plan "launchctl bootstrap gateway-$SLUG + honcho.$SLUG.backup; kickstart gateway"
+  say "DRY-RUN complete → $TMP"
+elif [ "$START" = "yes" ]; then
+  { command -v docker >/dev/null && docker info >/dev/null 2>&1; } || die "Docker not running — start it or rerun --no-start"
+  [ -d "$HONCHO_DIR/honcho/.git" ] || { say "cloning Honcho…"; git clone --depth 1 https://github.com/plastic-labs/honcho.git "$HONCHO_DIR/.src"; cp -R "$HONCHO_DIR/.src/." "$HONCHO_DIR/honcho/"; rm -rf "$HONCHO_DIR/.src"; }
+  ( cd "$HONCHO_DIR/honcho" && docker compose -p "$PROJECT" up -d --build )
+  for i in $(seq 1 30); do curl -fsS "http://127.0.0.1:$API_PORT/health" >/dev/null 2>&1 && break; sleep 2; done
+  curl -fsS "http://127.0.0.1:$API_PORT/health" >/dev/null 2>&1 && ok "honcho api healthy ($API_PORT)" || say "⚠ api not healthy — check: docker compose -p $PROJECT logs"
+  launchctl bootstrap "gui/$(id -u)" "$LA/ai.hermes.gateway-$SLUG.plist" 2>/dev/null || true
+  launchctl bootstrap "gui/$(id -u)" "$LA/ai.hermes.honcho.$SLUG.backup.plist" 2>/dev/null || true
+  launchctl kickstart -k "gui/$(id -u)/ai.hermes.gateway-$SLUG" 2>/dev/null || true
+  ok "launchd registered + gateway kickstarted"
+  say "⚠ MANUAL: (1) credentials → $PROFILE/auth.json  (2) write $PROFILE/SOUL.md  (3) seed grounding for '$WORKSPACE'"
+else ok "scaffold complete (--no-start)."; fi
+
+echo; say "── $NAME ready ($([ "$DRYRUN" = 1 ] && echo dry-run || echo live)) ──"
