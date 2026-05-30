@@ -103,3 +103,20 @@ config parses.
 A running container isn't a healthy API. A present config file isn't a *loaded* one
 (it can silently fall back to defaults). Each layer fails in its own way, so each is
 verified in its own way.
+
+### 11. Each agent is its own git repo at its root; `.gitignore` normalised, not centralised
+**Decision.** Every agent is a standalone git repo rooted at `AGENTS_ROOT/<Name>/`.
+Each carries its **own** copy of a **default-deny** `.gitignore` that follows one
+fleet standard — normalised (same rules everywhere) but not centralised (no shared
+or symlinked file). The ignore allow-lists only the durable identity (config, soul,
+memory, crons, scripts, sandbox, README); everything else is denied by default.
+
+**Why.** *Per-agent repo* keeps the independence principle (decision 1) true at the
+version-control layer — each agent's history is its own, pushable on its own, with
+no fleet-monorepo coupling. *Default-deny* is the only model that's safe by
+construction: an allow-list-on-top-of-deny can't leak a brand-new kind of secret,
+whereas a deny-list silently tracks anything you forgot to exclude. An early audit
+found one agent tracking 760+ files (including a retired memory plugin) next to
+another tracking 28 — the same drift decision 7 fights, now fixed with one rendered
+standard. *Normalised, not centralised* means a solo operator cloning one agent
+gets a correct ignore with no dependency on a shared file.
