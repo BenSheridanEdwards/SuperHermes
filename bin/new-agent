@@ -168,13 +168,16 @@ cp "$REPO/templates/USER.template.md"   "$PROFILE/memories/USER.md"   2>/dev/nul
 # or source from a secrets manager via config.yaml `secrets:` (e.g. BitWarden).
 render "$REPO/templates/profile.env.tmpl" > "$PROFILE/.env"
 # baseline memory crons: daily GBrain consolidation + memory hygiene
-export CONS_ID="$(openssl rand -hex 6 2>/dev/null || echo cons-$SLUG)" \
-       HYG_ID="$(openssl rand -hex 6 2>/dev/null || echo hyg-$SLUG)" \
+export MAINT_ID="$(openssl rand -hex 6 2>/dev/null || echo maint-$SLUG)" \
+       SYNC_ID="$(openssl rand -hex 6 2>/dev/null || echo sync-$SLUG)" \
        NOW="$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo 1970-01-01T00:00:00Z)"
 render "$REPO/templates/cron-jobs.json.tmpl" > "$PROFILE/cron/jobs.json"
-# the profile is its own git repo elsewhere — never commit secrets/runtime
-printf '.env\nauth.json\n*.lock\ngateway.pid\ngateway_state.json\nlogs/\n' > "$PROFILE/.gitignore"
-ok "honcho.json + SOUL + MEMORY/USER + .env(secret keys) + cron(consolidation+hygiene) + .gitignore"
+# normalised cron scripts: memory-maintenance context snapshot + daily git-sync
+render "$REPO/templates/memory-health-snapshot.py.tmpl" > "$PROFILE/scripts/memory_health_snapshot.py"; chmod +x "$PROFILE/scripts/memory_health_snapshot.py"
+render "$REPO/templates/git-sync.sh.tmpl" > "$PROFILE/scripts/git-sync.sh"; chmod +x "$PROFILE/scripts/git-sync.sh"
+# normalised root .gitignore (default-deny; per-agent copy of the fleet standard)
+render "$REPO/templates/gitignore.tmpl" > "$AGENT_ROOT/.gitignore"
+ok "honcho.json + SOUL + MEMORY/USER + .env(secret keys) + cron(memory-maintenance + git-sync) + root .gitignore"
 
 # ---- 4. gbrain (profile-isolated v0.41; own runtime, no cross-agent dep) -----
 say "4/8  GBrain"
@@ -239,8 +242,19 @@ cat > "$LA/ai.hermes.honcho.$SLUG.backup.plist" <<PLIST
 PLIST
 if command -v plutil >/dev/null; then plutil -lint "$LA/ai.hermes.gateway-$SLUG.plist" >/dev/null && ok "gateway + backup plists (lint clean)"; else ok "plists written"; fi
 
-# ---- 7. perms ---------------------------------------------------------------
-say "7/8  permissions"; find "$AGENT_ROOT" -type d -exec chmod 750 {} + 2>/dev/null || true; ok "dirs 750"
+# ---- 7. perms + git ---------------------------------------------------------
+say "7/8  permissions + git"
+find "$AGENT_ROOT" -type d -exec chmod 750 {} + 2>/dev/null || true; ok "dirs 750"
+# initialise the agent's OWN git repo at its root. The normalised default-deny
+# .gitignore means only the durable identity is versioned — secrets, caches, the
+# Honcho stack, the GBrain store, the vault, and workspace clones stay out.
+if command -v git >/dev/null && [ ! -d "$AGENT_ROOT/.git" ]; then
+  git -C "$AGENT_ROOT" init -q
+  git -C "$AGENT_ROOT" add -A
+  git -C "$AGENT_ROOT" -c user.name="SuperHermes" -c user.email="superhermes@agents.local" \
+      commit -q -m "chore: scaffold $NAME (SuperHermes)" || true
+  ok "git initialised at root ($(git -C "$AGENT_ROOT" ls-files 2>/dev/null | wc -l | tr -d ' ') files tracked)"
+else plan "git unavailable or repo already exists — skipped init"; fi
 
 # ---- 8. services ------------------------------------------------------------
 say "8/8  services"
