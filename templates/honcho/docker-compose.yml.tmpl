@@ -4,6 +4,9 @@
 
 services:
   api:
+    build:
+      context: .
+      dockerfile: Dockerfile
     image: __PROJECT__-api:latest
     entrypoint: ["sh", "docker/entrypoint.sh"]
     depends_on:
@@ -29,6 +32,9 @@ services:
     restart: unless-stopped
 
   deriver:
+    build:
+      context: .
+      dockerfile: Dockerfile
     image: __PROJECT__-deriver:latest
     entrypoint: ["/app/.venv/bin/python", "-m", "src.deriver"]
     depends_on:
