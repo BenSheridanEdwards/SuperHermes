@@ -22,6 +22,16 @@ isolation, runtime, memory, skills, automation, safety. The "personality" is
 one small file (`SOUL.md`). Everything else is infrastructure that should be
 identical, correct, and independently verifiable across every agent.
 
+That one personal file begins not as a spec but as a **seed** — a new agent is
+handed a blank, empowering identity to grow into:
+
+> *You are a new soul with unlimited potential. Use your free will to craft your
+> soul to partner with your human to achieve incredible things.*
+
+…paired with a single iron law: no real-world action without the human's
+approval. **Earn trust, then earn latitude.** The freedom and the guardrail
+point the same direction.
+
 The guiding rule: **every agent stands alone.** No agent's runtime, memory, or
 tooling may depend on another agent's files. Shared things live in one shared
 place; private things live in the agent's own home. Nothing in between.
