@@ -1,0 +1,45 @@
+# Hermes agent config — generic SuperHermes baseline.
+# Rendered by bin/new-agent; customize provider/model and the rest to taste.
+# Hermes fills sensible defaults for any key you omit.
+
+model:
+  provider: openai-codex      # change to your provider
+  default: gpt-5.5
+
+toolsets:
+  - hermes-cli
+
+agent:
+  max_turns: 150
+  tool_use_enforcement: auto
+
+terminal:
+  backend: local
+  modal_mode: auto
+  cwd: __WORKSPACE_CWD__
+  timeout: 600
+
+memory:
+  memory_enabled: true
+  user_profile_enabled: true
+  provider: honcho            # Honcho stack provisioned alongside this agent
+
+skills:
+  external_dirs:
+    - __SKILLS_DIR__          # shared custom skills library
+  template_vars: true
+
+approvals:
+  mode: smart
+  cron_mode: deny             # no autonomous scheduled sends without approval
+
+code_execution:
+  mode: project
+
+# Semantic/wiki brain (GBrain) over the agent's vault/. Remove if GBRAIN_BIN unset.
+mcp_servers:
+  gbrain:
+    command: __GBRAIN_BIN__
+    args:
+      - serve
+    enabled: true

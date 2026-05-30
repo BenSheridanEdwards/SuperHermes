@@ -1,0 +1,15 @@
+# Local operator config — never commit (machine-specific paths, private carve-outs)
+superhermes.conf
+
+# OS / editor cruft
+.DS_Store
+*.swp
+__pycache__/
+*.pyc
+
+# Local working state
+*.local
+/tmp/
+
+# Fleet-internal worked examples (contain a specific agent's private setup)
+examples/
