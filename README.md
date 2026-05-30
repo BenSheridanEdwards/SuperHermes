@@ -1,63 +1,155 @@
 # SuperHermes
 
-Spin up a sandboxed, memory-equipped AI agent on macOS with one command.
+**The source of truth for how an ideal Hermes agent is built.**
 
-SuperHermes is a small framework + reference architecture for running a fleet of
-[Hermes](https://github.com/NousResearch/hermes) agents side by side on a single
+SuperHermes is a framework + reference architecture for running a fleet of
+[Hermes](https://github.com/NousResearch/hermes) agents side by side on one
 machine — each isolated in its own home, each with its own persistent memory,
-all under a shared "town-square" security model.
+all under a shared "town-square" security model. One command builds an agent
+that already follows every pattern below.
 
 ```sh
-cp superhermes.conf.example superhermes.conf   # set AGENTS_ROOT and carve-outs
+cp superhermes.conf.example superhermes.conf   # set AGENTS_ROOT + carve-outs
 bin/new-agent --name Sky --camp personal --tier m
 ```
 
-That one command provisions the full anatomy: directory skeleton, a compiled
-sandbox profile, launchd services, the Hermes profile, a Honcho memory stack
-(Postgres + Redis in Docker, ports auto-allocated), a GBrain knowledge vault,
-and shared-skills wiring — then boots it.
+---
 
-## The town-square model
+## Philosophy: clone an OS, not a personality
 
-Every agent lives in its own home under `AGENTS_ROOT/<Name>` and has free reign
-over the shared account, with three carve-outs enforced by `sandbox-exec`:
+An agent is not a prompt. It's a set of **separable, independent layers** —
+isolation, runtime, memory, skills, automation, safety. The "personality" is
+one small file (`SOUL.md`). Everything else is infrastructure that should be
+identical, correct, and independently verifiable across every agent.
+
+The guiding rule: **every agent stands alone.** No agent's runtime, memory, or
+tooling may depend on another agent's files. Shared things live in one shared
+place; private things live in the agent's own home. Nothing in between.
+
+---
+
+## Anatomy of an ideal agent
+
+### 1. Isolation — a private home in a shared town square
+Each agent lives at `AGENTS_ROOT/<Name>/` with its **own** `.home`, caches
+(`.cache`, `.npm`, `.ollama`), `tmp`, `workspace`, `vault`, and Hermes profile.
+The gateway runs with `HOME`, `TMPDIR`, `XDG_CACHE_HOME`, `NPM_CONFIG_CACHE` all
+pointed inside that tree. No agent writes into another's home.
+
+### 2. Sandbox — the town-square model
+Enforced by macOS `sandbox-exec`, **allow-all-then-deny** (not a brittle
+allowlist, so PTYs/temp/Docker/browsers never break). The agent has free reign
+over the shared account with exactly three carve-outs:
 
 1. **Other agents' homes are read-only** — look through the window, don't enter.
-2. **Operator-protected paths are off-limits** — e.g. the human's own home.
+2. **Operator-protected paths are off-limits** — e.g. the human's own macOS home.
 3. **Optional need-to-know paths** — readable only by named agents.
 
-It's allow-all-then-deny (not a brittle allowlist), so normal tooling — PTYs,
-temp dirs, Docker, browsers — never breaks. All carve-outs come from your local
-`superhermes.conf`; the templates ship with none baked in.
+The OS sandbox is the **sole** write boundary. Do **not** set
+`HERMES_WRITE_SAFE_ROOT` — it's an app-level approval gate that only adds
+friction (it would prompt on every write outside the agent's own home, e.g.
+maintaining the shared skills library) while the sandbox already enforces the
+real rule.
 
-## Memory
+### 3. Runtime — the gateway under launchd
+A `launchd` job runs `sandbox-exec -f <agent>.sb … hermes_cli … gateway run`,
+with `KeepAlive` on `SuccessfulExit:false` so it restarts on failure but not on
+clean exit. Reload with `launchctl kickstart -k` (config change) or
+`bootout`+`bootstrap` (plist change).
 
-- **Honcho** — per-agent peer/user memory + dialectic recall (its own Postgres +
-  Redis stack, one per agent, ports auto-allocated).
-- **GBrain** — a semantic/wiki brain over each agent's markdown `vault/`.
-- **Bootstrap** — small, always-loaded `MEMORY.md` + `USER.md`.
+### 4. Memory — three layers, each verified separately
+- **Bootstrap** — small, always-loaded `MEMORY.md` + `USER.md`. High-signal, tiny.
+- **Honcho** — peer/user memory + dialectic recall. Each agent runs its **own**
+  Dockerized stack (API + deriver + Postgres/pgvector + Redis), with
+  **auto-allocated ports** (`DB = 5432 + (API−8000)`, `REDIS = 6379 + (API−8000)`).
+  Wired via `honcho.json` (`baseUrl`, workspace, peer).
+- **GBrain** — the semantic/wiki brain over the agent's markdown `vault/brain/`.
+  **The canonical, non-negotiable setup:**
+  - Runtime: **`github:garrytan/gbrain` v0.41.x**, installed *profile-isolated*
+    into the agent's own `<profile>/home/.bun` (**not** the npm `gbrain@1.3.1`
+    package — that's an unrelated GPU library).
+  - Store: **pglite** at `<profile>/home/.gbrain/brain.pglite` (768-dim
+    `nomic-embed-text`). Never SQLite.
+  - Access: the agent's **own** `<agent>/.local/bin/gbrain` wrapper (pins
+    `HOME`/`HERMES_HOME`/`BUN_INSTALL` and `OLLAMA_BASE_URL=…:11434/v1`). Never a
+    shared wrapper.
+  - `config.json`, the MCP command, and the CLI wrapper **all resolve to one
+    store** — this is what prevents the classic CLI↔MCP split-brain.
+
+### 5. Skills — shared procedural memory
+Repeatable workflows live once in the shared skills library; every agent's
+`config.yaml` lists it under `skills.external_dirs`. Agents read it; they don't
+each copy it.
+
+### 6. Automation — cron with hard approval gates
+Scheduled work is allowed to **draft, summarize, inspect, prepare, recommend**.
+It is never allowed to **send, post, buy, delete, or change credentials**
+without explicit human approval (`approvals.cron_mode: deny`).
+
+---
+
+## Non-negotiables (the invariants)
+
+An agent is "ideal" only if **all** of these hold:
+
+1. **Independent.** No cross-agent dependency in runtime, memory, or wrappers.
+2. **Own GBrain runtime** (v0.41, profile-isolated), pglite store, own wrapper,
+   all paths converging on one brain.
+3. **Town-square sandbox** with the three carve-outs; no `WRITE_SAFE_ROOT`.
+4. **No secrets in the repo.** Credentials (`auth.json`), tokens, and
+   machine-specific paths live only in the gitignored `superhermes.conf` / the
+   agent's own profile — never in a committed file.
+5. **Approval gates on every real-world side effect** (email, messages, posts,
+   purchases, deletions, credential changes).
+6. **Every layer independently verifiable** — Honcho `/health`, `gbrain stats`
+   /`health` (100% embed coverage), sandbox compiles, plist lints.
+
+---
+
+## Build it — one command
+
+```sh
+bin/new-agent --name Sky --camp personal --tier m   # interactive: name · camp · tier
+bin/new-agent --name Sky --dry-run                  # render to a temp dir, zero side effects
+bin/new-agent --name Sky --no-start                 # scaffold files only
+```
+
+The 8 phases: directory skeleton → town-square sandbox (compile-checked) →
+Hermes profile (`config.yaml`, `honcho.json`, SOUL stub, MEMORY/USER) → GBrain
+(own v0.41 runtime + wrapper + pglite config) → Honcho stack (compose + `.env` +
+backup, ports auto-allocated) → launchd plists → permissions → services
+(Honcho up, GBrain installed + vault imported + embedded, gateway started).
+
+**Two things it can't autogenerate** (it pauses for them): credentials
+(`auth.json`) and the agent's `SOUL.md` persona.
+
+## On-disk layout
+
+```
+AGENTS_ROOT/<Name>/
+├── .hermes/
+│   ├── sandbox/<slug>.sb              town-square profile
+│   ├── profiles/<slug>/
+│   │   ├── config.yaml               provider, memory, skills, mcp_servers.gbrain
+│   │   ├── honcho.json               Honcho wiring (own port/workspace)
+│   │   ├── SOUL.md                   identity (the one personal file)
+│   │   ├── auth.json                 credentials (never committed)
+│   │   ├── home/.gbrain/             canonical pglite store + config.json
+│   │   └── memories/{MEMORY,USER}.md bootstrap memory
+│   └── honcho/honcho/                Dockerized memory stack
+├── .local/bin/gbrain                 own GBrain v0.41 wrapper
+├── vault/brain/                      markdown knowledge → GBrain
+├── .home/ .cache/ .npm/ tmp/         isolated runtime dirs
+└── workspace/                        working directory
+```
 
 ## Requirements
-
-- macOS (uses `sandbox-exec` + launchd)
-- Docker (for the Honcho memory stacks)
-- A Hermes install + Python venv
-- Python 3, `bash`
-
-## Quickstart
-
-1. `cp superhermes.conf.example superhermes.conf` and set `AGENTS_ROOT` (the
-   folder that holds one directory per agent) plus any sandbox carve-outs.
-2. `bin/new-agent --name Sky --camp personal --tier m`
-   (add `--dry-run` to render to a temp dir with zero side effects first).
-3. Fill the two things the tool can't generate: credentials (`auth.json`) and
-   the agent's `SOUL.md` persona.
-
-`bin/new-agent --help` lists all flags.
+macOS (`sandbox-exec` + launchd) · Docker (Honcho) · a Hermes install + Python
+venv · Bun (GBrain) · Ollama (local embeddings) · Python 3, `bash`.
 
 ## Documentation
 
-The numbered docs are the reference architecture behind the tool:
+The numbered docs are the reference architecture in depth:
 
 | Doc | Topic |
 |-----|-------|
@@ -65,14 +157,13 @@ The numbered docs are the reference architecture behind the tool:
 | `01-profile-layout` | filesystem layout & isolation |
 | `02-config-baseline` | config posture |
 | `03-toolsets-and-permissions` | toolset design & risk model |
-| `04-memory-architecture` | Honcho + GBrain + bootstrap memory |
-| `05-gbrain-setup` | GBrain runtime, MCP, embeddings |
+| `04-memory-architecture` | bootstrap + Honcho + GBrain |
+| `05-gbrain-setup` | the canonical v0.41 GBrain build |
 | `06-skills-layer` | skills as procedural memory |
-| `07-cron-and-guardrails` | durable scheduled work |
+| `07-cron-and-guardrails` | durable scheduled work + approval gates |
 | `08-operator-modules` | optional Google/meetings/Kanban/voice |
 | `09-housekeeping` | keeping profiles lean |
 | `10-new-agent-scaffolding` | the `new-agent` command in depth |
 
 ## License
-
 MIT — see [LICENSE](LICENSE).
