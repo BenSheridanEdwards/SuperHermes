@@ -1,0 +1,97 @@
+# Architecture Decisions
+
+The durable decisions behind SuperHermes — the *why*, not the *what*. The README
+and numbered docs describe how an agent is built today; this file records the
+reasoning that shouldn't change as the implementation evolves. Each entry is a
+decision plus the failure it prevents.
+
+---
+
+### 1. Every agent stands alone
+**Decision.** No agent's runtime, memory, or tooling may depend on another agent's
+files. Shared things live in one shared place; private things live in the agent's
+own home. Nothing in between.
+
+**Why.** A "shared" GBrain wrapper that exec'd into one agent's private Bun cache
+made the whole fleet depend on that one agent — wipe its cache and others broke.
+Independence means a failure in one agent can't cascade.
+
+### 2. The sandbox is the sole write boundary — "town-square," allow-all-then-deny
+**Decision.** The OS sandbox (`sandbox-exec`) grants free reign over the shared
+account, denying only three things: other agents' homes (read-only), the operator's
+own profile, and any need-to-know vault. Not an allowlist.
+
+**Why.** Allowlist sandboxes drift and break ordinary tooling (PTYs, temp dirs,
+Docker) — every new tool needs a new rule. The real boundary is narrow and stable:
+*don't enter another home, the human, or the vault.* Express that as three denials
+and nothing legitimate ever breaks.
+
+### 3. No application-level write gate (`HERMES_WRITE_SAFE_ROOT`)
+**Decision.** Do not set the Hermes write-approval gate.
+
+**Why.** It would prompt for approval on every write outside the agent's own home —
+including legitimate work like maintaining the shared skills library or building
+apps — while adding no protection the OS sandbox doesn't already enforce. Friction
+with no upside.
+
+### 4. GBrain: one pglite store per agent, profile-isolated, own wrapper
+**Decision.** Each agent installs its own GBrain runtime into its profile-home,
+keeps one pglite store, and points its `config.json`, MCP command, and CLI wrapper
+at that one store.
+
+**Why.** The SQLite + shared-wrapper era produced two failures at once: a
+**split-brain** (CLI and MCP writing to different stores, so memory silently
+diverged) and a **cross-agent dependency** (the shared wrapper). Convergence on one
+store kills the split-brain; profile isolation kills the dependency.
+
+### 5. Honcho: one stack per agent, tiered by workload, bounded by a ceiling
+**Decision.** Every agent runs its own Honcho stack. Models are chosen by *workload
+tier* (S local / M cloud / L reasoning), and each agent has a *ceiling* that bounds
+how far it climbs. Ceilings come from one synced matrix, never hand-edited per agent.
+
+**Why.** Cost and latency should land where they belong — extraction is cheap and
+local; deep reasoning is rare and expensive. Per-agent ceilings let a low-stakes
+agent stay fully local while a flagship reaches the reasoning tier. One matrix as
+source of truth prevents the per-file drift that hand-editing always produces.
+
+### 6. Three memory layers, each with one job
+**Decision.** Bootstrap (`MEMORY.md`/`USER.md`, tiny, always-loaded) · Honcho
+(passive peer learning) · GBrain (curated knowledge). Don't duplicate across them.
+
+**Why.** Conflating them bloats always-loaded context and double-stores facts.
+Honcho learns *about the user* automatically; GBrain is what the agent *curates*;
+bootstrap is the handful of facts needed every turn. Distinct jobs, distinct stores.
+
+### 7. Config is generated/synced from one source — never hand-edited per agent
+**Decision.** Per-agent config derives from templates and matrices, not manual edits.
+
+**Why.** Hand-edited fleets drift. A single audit found three different config
+schema versions, split GBrain stores, and a missing memory-wiring file — all
+silent. One source + a render/sync step makes drift structurally hard.
+
+### 8. A new agent is born inspired *and* safe
+**Decision.** `SOUL.md` starts as a seed ("a new soul with unlimited potential…
+craft your soul to partner with your human") paired with one iron law: no
+real-world action without the human's approval. *Earn trust, then earn latitude.*
+
+**Why.** Identity is the one file an agent should self-author, so seed a tone, not a
+spec. But a day-one agent can send email and post to the world — so the iron law is
+non-negotiable. Framing the boundary as a runway ("earn latitude") makes freedom
+and safety point the same way.
+
+### 9. No secrets in the repo
+**Decision.** Credentials, tokens, and machine-specific paths live only in the
+gitignored local config or the agent's own profile — never in a committed file.
+
+**Why.** The framework is meant to be shared/open-source. Secrets are recoverable;
+a leaked secret in public git history is not.
+
+### 10. Verify every layer independently — "looks set up" ≠ "works"
+**Decision.** Never report a layer healthy without its own evidence: Honcho
+`/health`, `gbrain stats`/`health` (embed coverage), sandbox compiles, plist lints,
+config parses.
+
+**Why.** A `vault/brain/` folder proves markdown exists, not that GBrain indexes it.
+A running container isn't a healthy API. A present config file isn't a *loaded* one
+(it can silently fall back to defaults). Each layer fails in its own way, so each is
+verified in its own way.

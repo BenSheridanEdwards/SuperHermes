@@ -36,6 +36,11 @@ The guiding rule: **every agent stands alone.** No agent's runtime, memory, or
 tooling may depend on another agent's files. Shared things live in one shared
 place; private things live in the agent's own home. Nothing in between.
 
+The rest of this README describes *how* an agent is built today. The durable
+**decisions** behind it — and the specific failure each one prevents — are
+recorded in **[ARCHITECTURE.md](ARCHITECTURE.md)**. Read that to understand *why*
+the framework is shaped the way it is.
+
 ---
 
 ## Anatomy of an ideal agent
