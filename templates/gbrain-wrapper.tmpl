@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Profile-isolated GBrain v0.41 runtime for __AGENT_NAME__.
+# Own install (github:garrytan/gbrain in <profile>/home/.bun) — NO cross-agent
+# dependency, NO shared wrapper. Pins all resolution inside this agent.
+set -euo pipefail
+ROOT="__AGENT_ROOT__"
+PROFILE="$ROOT/.hermes/profiles/__AGENT_SLUG__"
+export HERMES_HOME="$PROFILE"
+export HOME="$PROFILE/home"
+export BUN_INSTALL="$HOME/.bun"
+export XDG_CACHE_HOME="$HOME/.cache"
+# v0.41 Ollama recipe needs an OpenAI-compatible base URL (/v1).
+export OLLAMA_BASE_URL="${OLLAMA_BASE_URL:-http://127.0.0.1:11434/v1}"
+export PATH="/opt/homebrew/bin:$BUN_INSTALL/bin:${PATH:-}"
+exec "$BUN_INSTALL/bin/gbrain" "$@"

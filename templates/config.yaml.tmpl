@@ -36,10 +36,11 @@ approvals:
 code_execution:
   mode: project
 
-# Semantic/wiki brain (GBrain) over the agent's vault/. Remove if GBRAIN_BIN unset.
+# Semantic/wiki brain (GBrain v0.41, profile-isolated). Each agent runs its OWN
+# runtime via its OWN wrapper — no shared/cross-agent dependency.
 mcp_servers:
   gbrain:
-    command: __GBRAIN_BIN__
+    command: __AGENT_ROOT__/.local/bin/gbrain
     args:
       - serve
     enabled: true

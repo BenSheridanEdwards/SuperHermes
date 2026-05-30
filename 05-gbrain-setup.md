@@ -6,6 +6,17 @@ GBrain is the fleet semantic/wiki memory layer.
 
 Document and verify all of these separately: markdown vault path, runtime store path, CLI wrapper, engine type, embedding provider/model/dimensions, MCP registration, import/index status, search/query smoke tests, health/doctor output, and lock/concurrency caveats.
 
+## Canonical setup (v0.41, profile-isolated) — what `bin/new-agent` builds
+
+Each agent runs its **own** GBrain runtime — no shared wrapper, no cross-agent dependency (one agent's brain must never depend on another agent's files):
+
+- **Runtime:** `github:garrytan/gbrain` (v0.41.x), installed into the agent's own profile-home Bun — `bun add -g github:garrytan/gbrain` with `HOME=<profile>/home`, `BUN_INSTALL=<profile>/home/.bun`. (NOT the npm `gbrain@1.3.1` package — that's an unrelated GPU JS library.)
+- **Store:** pglite at `<profile>/home/.gbrain/brain.pglite` (768-dim `nomic-embed-text`). Not SQLite.
+- **Wrapper:** `<agent>/.local/bin/gbrain` pins `HERMES_HOME`, `HOME`, `BUN_INSTALL`, `XDG_CACHE_HOME`, and `OLLAMA_BASE_URL=http://127.0.0.1:11434/v1`.
+- **config.json:** `{ "engine": "pglite", "database_path": ".../brain.pglite", "embedding_base_url": ".../v1" }`.
+- **MCP:** `mcp_servers.gbrain.command` → the agent's own wrapper (never a shared one).
+- **Seed:** `gbrain import <agent>/vault/brain` then `gbrain embed --stale`.
+
 ## Recommended vault shape
 
 ```text
@@ -39,7 +50,7 @@ Repair pattern:
 
 ## Embeddings
 
-Prefer local embeddings where available. The Jeeves reference uses `ollama:nomic-embed-text:latest`, 768 dimensions, via local Ollama. Do not assume OpenAI credentials are required until checking the active GBrain config.
+Prefer local embeddings where available — `ollama:nomic-embed-text:latest`, 768 dimensions, via local Ollama. **GBrain v0.41's Ollama recipe needs an OpenAI-compatible base URL** (`http://127.0.0.1:11434/v1`); plain `…:11434` can return `Not Found` on embed even when Ollama's native `/api/embeddings` works. Do not assume OpenAI credentials are required until checking the active GBrain config.
 
 ## PGLite lock caveat
 

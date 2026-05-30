@@ -131,7 +131,7 @@ say "3/8  Hermes profile"
 if [ -n "$REF_AGENT" ] && [ -d "$AGENTS_ROOT/$REF_AGENT" ]; then
   rs="$(printf '%s' "$REF_AGENT" | tr '[:upper:]' '[:lower:]')"
   sed -e "s|$AGENTS_ROOT/$REF_AGENT/|$AGENT_ROOT/|g" \
-      -e "s|command: .*/gbrain|command: ${GBRAIN_BIN:-gbrain}|" \
+      -e "s|command: .*/gbrain|command: $AGENT_ROOT/.local/bin/gbrain|" \
       -e "s|^TELEGRAM_HOME_CHANNEL:.*|TELEGRAM_HOME_CHANNEL: ''|" \
       "$AGENTS_ROOT/$REF_AGENT/.hermes/profiles/$rs/config.yaml" > "$PROFILE/config.yaml"
   ok "config.yaml (cloned from $REF_AGENT, repointed, telegram cleared)"
@@ -158,15 +158,21 @@ cp "$REPO/templates/MEMORY.template.md" "$PROFILE/memories/MEMORY.md" 2>/dev/nul
 cp "$REPO/templates/USER.template.md"   "$PROFILE/memories/USER.md"   2>/dev/null || true
 ok "honcho.json + SOUL stub + MEMORY/USER"
 
-# ---- 4. gbrain --------------------------------------------------------------
+# ---- 4. gbrain (profile-isolated v0.41; own runtime, no cross-agent dep) -----
 say "4/8  GBrain"
-cat > "$AGENT_ROOT/.home/.gbrain/config.json" <<JSON
-{ "engine": "pglite", "database_path": "$AGENT_ROOT/.home/.gbrain/brain.pglite",
+mkdir -p "$PROFILE/home/.gbrain" "$AGENT_ROOT/.local/bin"
+# canonical store at PROFILE-HOME (not .home); pglite engine; /v1 Ollama for embeddings
+cat > "$PROFILE/home/.gbrain/config.json" <<JSON
+{ "engine": "pglite", "database_path": "$PROFILE/home/.gbrain/brain.pglite",
+  "source_path": "$AGENT_ROOT/vault/brain",
   "embedding_model": "ollama:nomic-embed-text:latest", "embedding_dimensions": 768,
-  "embedding_base_url": "http://localhost:11434" }
+  "embedding_base_url": "http://localhost:11434/v1" }
 JSON
+# the agent's OWN wrapper — points only at its own profile-isolated runtime
+render "$REPO/templates/gbrain-wrapper.tmpl" > "$AGENT_ROOT/.local/bin/gbrain"
+chmod +x "$AGENT_ROOT/.local/bin/gbrain"
 printf '# %s — GBrain\n\nKnowledge base index.\n' "$NAME" > "$AGENT_ROOT/vault/brain/HOME.md"
-ok "gbrain config + vault/brain skeleton (768-dim)"
+ok "gbrain config (profile-home pglite, /v1) + own wrapper + vault/brain"
 
 # ---- 5. honcho stack --------------------------------------------------------
 say "5/8  Honcho stack"
@@ -190,7 +196,7 @@ cat > "$LA/ai.hermes.gateway-$SLUG.plist" <<PLIST
   </array>
   <key>WorkingDirectory</key><string>$AGENT_ROOT/workspace</string>
   <key>EnvironmentVariables</key><dict>
-    <key>HERMES_HOME</key><string>$PROFILE</string><key>HERMES_WRITE_SAFE_ROOT</key><string>$AGENT_ROOT</string>
+    <key>HERMES_HOME</key><string>$PROFILE</string>
     <key>HOME</key><string>$AGENT_ROOT/.home</string><key>TMPDIR</key><string>$AGENT_ROOT/tmp</string>
     <key>XDG_CACHE_HOME</key><string>$AGENT_ROOT/.cache</string><key>NPM_CONFIG_CACHE</key><string>$AGENT_ROOT/.npm</string>
     <key>VIRTUAL_ENV</key><string>$HERMES_VENV</string>
@@ -222,6 +228,7 @@ say "7/8  permissions"; find "$AGENT_ROOT" -type d -exec chmod 750 {} + 2>/dev/n
 say "8/8  services"
 if [ "$DRYRUN" = 1 ]; then
   plan "clone Honcho, docker compose -p $PROJECT up -d --build, configure embeddings, health-gate :$API_PORT"
+  plan "install GBrain v0.41 (profile-isolated) + import vault/brain + embed"
   plan "launchctl bootstrap gateway-$SLUG + honcho.$SLUG.backup; kickstart gateway"
   say "DRY-RUN complete → $TMP"
 elif [ "$START" = "yes" ]; then
@@ -230,6 +237,18 @@ elif [ "$START" = "yes" ]; then
   ( cd "$HONCHO_DIR/honcho" && docker compose -p "$PROJECT" up -d --build )
   for i in $(seq 1 30); do curl -fsS "http://127.0.0.1:$API_PORT/health" >/dev/null 2>&1 && break; sleep 2; done
   curl -fsS "http://127.0.0.1:$API_PORT/health" >/dev/null 2>&1 && ok "honcho api healthy ($API_PORT)" || say "⚠ api not healthy — check: docker compose -p $PROJECT logs"
+  # GBrain: install the real v0.41 runtime (profile-isolated) + seed from vault/brain
+  # BEFORE the gateway starts (its MCP would lock the pglite store).
+  if command -v bun >/dev/null; then
+    say "installing GBrain v0.41 (profile-isolated)…"
+    ( export HOME="$PROFILE/home" BUN_INSTALL="$PROFILE/home/.bun" XDG_CACHE_HOME="$PROFILE/home/.cache" PATH="/opt/homebrew/bin:$PROFILE/home/.bun/bin:$PATH"
+      mkdir -p "$BUN_INSTALL/bin"
+      bun add -g github:garrytan/gbrain >/dev/null 2>&1 || say "⚠ gbrain install failed — run: bun add -g github:garrytan/gbrain" )
+    "$AGENT_ROOT/.local/bin/gbrain" import "$AGENT_ROOT/vault/brain" >/dev/null 2>&1 || true
+    "$AGENT_ROOT/.local/bin/gbrain" embed --stale >/dev/null 2>&1 || true
+    "$AGENT_ROOT/.local/bin/gbrain" stats 2>/dev/null | grep -iE "^Pages|^Embedded" | sed 's/^/  gbrain /' || true
+    ok "GBrain runtime installed + vault seeded"
+  else say "⚠ bun not found — install GBrain manually: bun add -g github:garrytan/gbrain"; fi
   launchctl bootstrap "gui/$(id -u)" "$LA/ai.hermes.gateway-$SLUG.plist" 2>/dev/null || true
   launchctl bootstrap "gui/$(id -u)" "$LA/ai.hermes.honcho.$SLUG.backup.plist" 2>/dev/null || true
   launchctl kickstart -k "gui/$(id -u)/ai.hermes.gateway-$SLUG" 2>/dev/null || true
