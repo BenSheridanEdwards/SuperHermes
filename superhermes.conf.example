@@ -7,8 +7,8 @@ AGENTS_ROOT="$HOME/Agents"
 # Shared skills library each agent is wired to read (Hermes `skills.external_dirs`).
 SKILLS_DIR="$AGENTS_ROOT/Shared/skills"
 
-# GBrain CLI wrapper (semantic/wiki brain). Leave blank to skip GBrain wiring.
-GBRAIN_BIN="$AGENTS_ROOT/Shared/bin/gbrain"
+# GBrain: each agent gets its OWN profile-isolated v0.41 runtime + wrapper at
+# <agent>/.local/bin/gbrain (installed by new-agent). No shared/global path needed.
 
 # Python venv that runs the Hermes gateway.
 HERMES_VENV="$HOME/.hermes/hermes-agent/venv"

@@ -19,8 +19,8 @@ Prompts: **name** (PascalCase) · **camp** (`personal`|`codewalnut` → workspac
 
 1. Directory skeleton (profile, sandbox, honcho, .home/.gbrain, caches, vault/brain)
 2. **Sandbox** — rendered from `templates/sandbox.sb.template` (town-square model), compile-checked
-3. **Hermes profile** — `config.yaml` (rendered from a bundled generic template (or cloned from an existing agent via `REF_AGENT`), paths repointed, Telegram channel cleared, skills→`Shared/skills`, gbrain→`Shared/bin/gbrain`), `honcho.json`, SOUL stub, MEMORY/USER
-4. **GBrain** — `config.json` (768-dim nomic-embed) + `vault/brain/` skeleton
+3. **Hermes profile** — `config.yaml` (rendered from a bundled generic template (or cloned from an existing agent via `REF_AGENT`), paths repointed, Telegram channel cleared, skills→`Shared/skills`, gbrain→the agent's own `.local/bin/gbrain`), `honcho.json`, SOUL stub, MEMORY/USER
+4. **GBrain** — own profile-isolated **v0.41** runtime + `.local/bin/gbrain` wrapper, pglite `config.json` at profile-home (768-dim, `/v1` Ollama), `vault/brain/` skeleton (the start phase installs the runtime + imports vault + embeds)
 5. **Honcho stack** — `docker-compose.yml` + `.env` + `backup.sh` with **auto-allocated ports** (next free triple: API 8007→, DB/Redis derived)
 6. **launchd plists** — gateway (sandbox-wrapped) + honcho nightly backup, lint-checked
 7. Permissions (dirs `750`)
