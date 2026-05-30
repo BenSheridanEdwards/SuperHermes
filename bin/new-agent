@@ -144,8 +144,9 @@ cat > "$PROFILE/honcho.json" <<JSON
   "hosts": { "hermes.$SLUG": { "enabled": true, "workspace": "$WORKSPACE",
     "peerName": "operator", "aiPeer": "$AI_PEER", "pinPeerName": true,
     "saveMessages": true, "writeFrequency": "async", "recallMode": "hybrid",
-    "dialecticReasoningLevel": "$DLEVEL", "dialecticDynamic": true,
-    "dialecticMaxChars": 800, "messageMaxChars": 20000, "contextTokens": 1200,
+    "dialecticReasoningLevel": "low", "dialecticDynamic": true,
+    "dialecticMaxChars": 800, "messageMaxChars": 20000,
+    "dialecticMaxInputChars": 8000, "contextTokens": 1200,
     "observation": true } } }
 JSON
 cat > "$PROFILE/SOUL.md" <<SOUL
