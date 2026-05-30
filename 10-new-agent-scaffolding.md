@@ -19,11 +19,11 @@ Prompts: **name** (PascalCase) · **camp** (`personal`|`codewalnut` → workspac
 
 1. Directory skeleton (profile, sandbox, honcho, .home/.gbrain, caches, vault/brain)
 2. **Sandbox** — rendered from `templates/sandbox.sb.template` (town-square model), compile-checked
-3. **Hermes profile** — `config.yaml` (rendered from a bundled generic template (or cloned from an existing agent via `REF_AGENT`), paths repointed, Telegram channel cleared, skills→`Shared/skills`, gbrain→the agent's own `.local/bin/gbrain`), `honcho.json`, SOUL stub, MEMORY/USER
+3. **Hermes profile** — `config.yaml` (rendered from a bundled generic template (or cloned from an existing agent via `REF_AGENT`), paths repointed, Telegram channel cleared, skills→`Shared/skills`, gbrain→the agent's own `.local/bin/gbrain`), `honcho.json`, SOUL stub, MEMORY/USER, the two baseline crons (**memory-maintenance** — snapshot-fed consolidation + hygiene — and **identity git-sync**) plus their scripts, and the **normalised root `.gitignore`** (default-deny; from `templates/gitignore.tmpl`)
 4. **GBrain** — own profile-isolated **v0.41** runtime + `.local/bin/gbrain` wrapper, pglite `config.json` at profile-home (768-dim, `/v1` Ollama), `vault/brain/` skeleton (the start phase installs the runtime + imports vault + embeds)
 5. **Honcho stack** — `docker-compose.yml` + `.env` + `backup.sh` with **auto-allocated ports** (next free triple: API 8007→, DB/Redis derived)
 6. **launchd plists** — gateway (sandbox-wrapped) + honcho nightly backup, lint-checked
-7. Permissions (dirs `750`)
+7. **Permissions + git** — dirs `750`, then `git init` the agent's **own repo at its root** (`AGENTS_ROOT/<Name>/`) and an initial commit. The normalised default-deny `.gitignore` means only the durable identity is versioned — secrets, caches, the Honcho stack, the GBrain store, the vault (its own repo), and workspace clones stay out by construction.
 8. **Services** (unless `--no-start`) — clone Honcho, `docker compose up`, embeddings, health-gate, register + kickstart launchd, `honcho_tier_sync.py`
 
 ## Port scheme
