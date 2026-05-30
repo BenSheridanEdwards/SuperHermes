@@ -1,19 +1,21 @@
 {
   "jobs": [
     {
-      "id": "__CONS_ID__",
-      "name": "Daily GBrain consolidation",
-      "prompt": "You are __AGENT_NAME__ running your daily memory consolidation. Review recent sessions, Honcho outputs, and cron outputs. Distil ONLY durable facts into curated GBrain pages under vault/brain/ (people, projects, tech, guides, daily, etc.). Reject secrets, raw transcripts, stale task artifacts (PR numbers, SHAs), and facts Honcho already holds. Import + embed (gbrain import vault/brain --no-embed; gbrain embed --stale), then verify with gbrain stats/search. Update MEMORY.md/USER.md only for critical always-loaded facts. Report what you wrote and what you rejected, with evidence.",
+      "id": "__MAINT_ID__",
+      "name": "Daily memory maintenance",
+      "prompt": "You are __AGENT_NAME__ running your daily memory maintenance. The attached snapshot (real vault/GBrain/Honcho numbers) is your read-only ground truth — use it; don't guess. Do all GBrain work via your OWN wrapper at __AGENT_ROOT__/.local/bin/gbrain (never a shared one).\n\nPART 1 — CONSOLIDATE. Two sources, both filed into curated TOPICAL pages under vault/brain/ (people, projects, tech, guides, companies, concepts, daily).\n\n1a. SESSIONS. Review recent sessions (incl. messaging) + cron outputs. Distil ONLY durable facts. Reject secrets, raw transcripts, and stale task artifacts (PR numbers, SHAs, one-off completions).\n\n1b. HONCHO HARVEST. Honcho is your live, passive peer-learning layer — promote its durable distillate; never mirror it wholesale, never re-file what is already there. (i) Read the peer card: honcho_profile(peer='user') — its stable facts are promotion candidates. (ii) Surface recent durable signal cheaply with a few honcho_search queries (max_tokens 1500): 'recent decisions, preferences, corrections'; 'recent project & technical state, discoveries'; 'recurring patterns & workflow'. Add ONE honcho_reasoning query at low/medium ONLY if synthesis is needed (it is costed) — that is where dialectic/dream-synthesised insight surfaces. (iii) Route by type, file in place: durable world knowledge -> the right topical page, UPDATED in place; critical user facts -> USER.md (sparingly); NEVER a dated honcho-insights-YYYY-MM-DD dump. (iv) Idempotent: read the target page first; write only what is genuinely new or materially changed. Leave volatile/low-confidence observations in Honcho; do not copy PII; if a personal fact is uncertain or consequential, raise it to Chief instead of saving it.\n\nThen import + embed: __AGENT_ROOT__/.local/bin/gbrain import __AGENT_ROOT__/vault/brain --no-embed then __AGENT_ROOT__/.local/bin/gbrain embed --stale. Update MEMORY.md only for critical always-loaded facts.\n\nPART 2 — HYGIENE. Scan Honcho + GBrain for poison/staleness: wrong employer/client identity, misspelled personal emails, inferred birthdays/ages, brittle unverified meeting times, obsolete architecture/ownership. Correct only durable, high-confidence facts; flag the rest for human review. Confirm GBrain is the canonical brain and that the CLI and MCP resolve to ONE store (no split-brain), and that retrieval works.\n\nReport green/amber/red: what you filed, what you corrected, what you rejected — with evidence. Silent work unless something genuinely needs Chief.",
       "skill": "memory-architecture",
-      "schedule": { "kind": "cron", "expr": "0 21 * * *", "display": "21:00 daily" },
+      "script": "memory_health_snapshot.py",
+      "schedule": { "kind": "cron", "expr": "0 23 * * *", "display": "23:00 daily" },
       "enabled": true
     },
     {
-      "id": "__HYG_ID__",
-      "name": "Daily memory hygiene — Honcho/GBrain poison check",
-      "prompt": "You are __AGENT_NAME__ running your daily memory hygiene check. Scan Honcho + GBrain for poison/staleness classes: wrong employer/client identity, misspelled personal emails, inferred birthdays/ages, brittle unverified meeting times, obsolete architecture/ownership assumptions. Correct only durable, high-confidence facts; reject or flag the rest for human review. Confirm GBrain remains the canonical brain and retrieval works. Report green/amber/red, what changed, what was rejected, with evidence.",
-      "skill": "memory-architecture",
-      "schedule": { "kind": "cron", "expr": "0 22 * * *", "display": "22:00 daily" },
+      "id": "__SYNC_ID__",
+      "name": "Daily identity git-sync",
+      "prompt": "Deterministic backup of __AGENT_NAME__'s durable identity to its own private git repo. The script stages (gitignore-scoped to identity only), runs a secret tripwire, commits, and pushes. Runs after memory maintenance so it captures the night's new pages. Stays silent when nothing changed.",
+      "script": "git-sync.sh",
+      "no_agent": true,
+      "schedule": { "kind": "cron", "expr": "0 0 * * *", "display": "00:00 daily" },
       "enabled": true
     }
   ],

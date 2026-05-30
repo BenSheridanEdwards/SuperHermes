@@ -1,0 +1,72 @@
+#!/usr/bin/env python3
+# ============================================================================
+# memory_health_snapshot.py — read-only ground-truth context for the daily
+# memory-maintenance cron (SuperHermes normalised script).
+#
+# Runs as the cron's `script:` in DEFAULT (non-no_agent) mode, so its stdout is
+# injected into the LLM job's prompt as context. The agent then consolidates +
+# runs hygiene against REAL numbers instead of guessing.
+#
+# Read-only. Uses the agent's OWN GBrain wrapper (never a shared one). If the
+# GBrain MCP holds the PGLite lock, CLI checks report a lock — the agent should
+# then use GBrain MCP tools / file search instead.
+#   agent: __AGENT_NAME__ (slug __AGENT_SLUG__)
+# ============================================================================
+import json, subprocess, urllib.request
+from datetime import datetime, timezone
+from pathlib import Path
+
+ROOT = Path("__AGENT_ROOT__")
+SLUG = "__AGENT_SLUG__"
+PROFILE = ROOT / ".hermes" / "profiles" / SLUG
+BRAIN = ROOT / "vault" / "brain"
+GBRAIN = ROOT / ".local" / "bin" / "gbrain"  # the agent's OWN profile-isolated wrapper
+
+
+def run(cmd, timeout=60):
+    try:
+        p = subprocess.run(cmd, text=True, capture_output=True, timeout=timeout)
+        return p.returncode, (p.stdout + p.stderr).strip()
+    except Exception as e:
+        return 999, f"{type(e).__name__}: {e}"
+
+
+print(f"# memory snapshot — __AGENT_NAME__ — {datetime.now(timezone.utc).isoformat(timespec='seconds')}")
+print(f"profile: {PROFILE}")
+
+# --- vault/brain markdown (GBrain's source) ---------------------------------
+if BRAIN.is_dir():
+    md = list(BRAIN.rglob("*.md"))
+    print(f"\n## vault/brain — {len(md)} markdown pages (15 most recently modified)")
+    for p in sorted(md, key=lambda x: x.stat().st_mtime, reverse=True)[:15]:
+        print(f"  {p.relative_to(BRAIN)}")
+else:
+    print(f"\n## vault/brain — MISSING at {BRAIN}")
+
+# --- GBrain runtime via OWN wrapper -----------------------------------------
+print("\n## GBrain (own wrapper, read-only)")
+if GBRAIN.exists():
+    for sub in ("stats", "health"):
+        code, out = run([str(GBRAIN), sub])
+        if code == 0:
+            print(f"### gbrain {sub}\n{out}")
+        else:
+            print(f"### gbrain {sub} — unavailable (exit {code}; likely MCP holds the "
+                  f"PGLite lock → use MCP tools / file search)\n{out[:300]}")
+else:
+    print(f"  OWN WRAPPER MISSING at {GBRAIN} — GBrain is misconfigured")
+
+# --- Honcho health ----------------------------------------------------------
+print("\n## Honcho")
+try:
+    base = json.loads((PROFILE / "honcho.json").read_text()).get("baseUrl", "").rstrip("/")
+    with urllib.request.urlopen(base + "/health", timeout=5) as r:
+        print(f"  {base}/health → HTTP {r.status}")
+except Exception as e:
+    print(f"  health check failed: {type(e).__name__}: {e}")
+
+print("\n## Watch for (hygiene)")
+print("  Wrong employer/client identity · misspelled personal emails · inferred")
+print("  birthdays/ages · brittle unverified meeting times · obsolete architecture/")
+print("  ownership assumptions · CLI↔MCP split-brain (two stores).")
+print("\n(Ground truth above. Verify via MCP / file search before writing.)")
