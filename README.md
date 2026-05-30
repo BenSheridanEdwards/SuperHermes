@@ -62,7 +62,9 @@ clean exit. Reload with `launchctl kickstart -k` (config change) or
 - **Honcho** — peer/user memory + dialectic recall. Each agent runs its **own**
   Dockerized stack (API + deriver + Postgres/pgvector + Redis), with
   **auto-allocated ports** (`DB = 5432 + (API−8000)`, `REDIS = 6379 + (API−8000)`).
-  Wired via `honcho.json` (`baseUrl`, workspace, peer).
+  Wired via `honcho.json`; the gateway auto-creates the workspace + `operator`/
+  `<agent>` peers. Runs a **3-tier model** (local Tier S / cloud Tier M /
+  reasoning Tier L), bounded per agent by a **ceiling** kept in one synced matrix.
 - **GBrain** — the semantic/wiki brain over the agent's markdown `vault/brain/`.
   **The canonical, non-negotiable setup:**
   - Runtime: **`github:garrytan/gbrain` v0.41.x**, installed *profile-isolated*
