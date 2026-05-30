@@ -22,7 +22,29 @@ that keep it simple and portable are very welcome.
    This renders the full tree to a temp dir with no side effects and compiles the
    sandbox profile — confirm it passes before opening a PR.
 3. `bash -n bin/new-agent` to syntax-check.
-4. Open a PR describing what changed and how you verified it.
+4. **Run the tests** — they lock down the shipping scripts (gitignore default-deny,
+   git-sync silence + secret tripwire + no-force, scaffolder dry-run):
+   ```sh
+   bash tests/run-tests.sh        # must be green
+   ```
+5. Open a PR describing what changed and how you verified it.
+
+## Verifying a live fleet
+
+`bin/verify-fleet` asserts the framework's invariants across every agent under
+`AGENTS_ROOT` — fast, no-LLM, stdlib-only. It's the "diagnose" half of fleet
+ops: cron scripts all exist, no stale shared-wrapper or retired-system refs, no
+secrets/bloat tracked in git, normalised `.gitignore`, profile-isolated GBrain,
+consistent config versions, baseline crons present.
+
+```sh
+bin/verify-fleet               # all agents · exit 1 on any FAIL
+bin/verify-fleet --agent Sky   # one agent
+bin/verify-fleet --quiet       # only WARN/FAIL + summary
+```
+
+Run it after any change to a live fleet (and ideally on a daily cron) — most
+real-world drift is config / cross-reference, exactly what it catches.
 
 ## Scope
 

@@ -1,0 +1,263 @@
+#!/usr/bin/env python3
+# ============================================================================
+# verify-fleet — assert SuperHermes invariants across every agent in a fleet.
+#
+# Fast, no-LLM, no third-party deps (stdlib only). Discovers agents under
+# AGENTS_ROOT and checks the invariants the framework depends on. Most of the
+# bugs a hand-built fleet accumulates are config / cross-reference drift, not
+# logic bugs — this catches that whole class in one pass.
+#
+# Exit code: 0 = all checks pass (warnings allowed), 1 = one or more FAILs.
+#
+# Usage:
+#   verify-fleet                 # all agents under AGENTS_ROOT
+#   verify-fleet --agent Iris    # one agent
+#   verify-fleet --root /path    # override AGENTS_ROOT
+#   verify-fleet --quiet         # only WARN/FAIL lines + summary
+#
+# AGENTS_ROOT resolves from: --root → $AGENTS_ROOT → superhermes.conf(.example).
+# ============================================================================
+import argparse, json, os, re, subprocess, sys, plistlib
+from pathlib import Path
+
+C = {"P": "\033[32m", "W": "\033[33m", "F": "\033[31m", "H": "\033[36m", "D": "\033[2m", "x": "\033[0m"}
+if not sys.stdout.isatty():
+    C = {k: "" for k in C}
+
+TRACKED_WARN_THRESHOLD = 60  # identity repos are tiny; more than this smells like bloat
+SECRET_FILE_RE = re.compile(r"(^|/)\.env($|\.)|auth\.json|google_token|\.git-credentials|"
+                            r".*token.*|.*credential.*|.*secret.*|\.pem$|\.key$|\.p12$", re.I)
+BINARY_TRACKED_RE = re.compile(r"\.(pglite|sqlite|sqlite3|db|gguf|safetensors|bin|"
+                               r"png|jpe?g|gif|webp|mp4|mov|ogg|mp3|wav|pdf|zip)$", re.I)
+TRACKED_TREE_DENY_RE = re.compile(r"^(vault/|workspace/|\.hermes/honcho/|\.home/|\.cache/|\.npm/)")
+
+
+class Report:
+    def __init__(self):
+        self.fails = 0
+        self.warns = 0
+        self.passes = 0
+
+    def line(self, level, agent, msg, detail=""):
+        sym = {"P": "✓", "W": "⚠", "F": "✗"}[level]
+        col = C[level]
+        if level == "P":
+            self.passes += 1
+        elif level == "W":
+            self.warns += 1
+        else:
+            self.fails += 1
+        if level == "P" and QUIET:
+            return
+        d = f"  {C['D']}{detail}{C['x']}" if detail else ""
+        print(f"  {col}{sym}{C['x']} {msg}{d}")
+
+
+def resolve_root(args, repo):
+    if args.root:
+        return Path(args.root)
+    if os.environ.get("AGENTS_ROOT"):
+        return Path(os.environ["AGENTS_ROOT"])
+    for name in ("superhermes.conf", "superhermes.conf.example"):
+        p = repo / name
+        if p.exists():
+            m = re.search(r'^\s*AGENTS_ROOT\s*=\s*["\']?([^"\'\n#]+)', p.read_text(), re.M)
+            if m:
+                return Path(m.group(1).strip())
+    sys.exit("verify-fleet: cannot resolve AGENTS_ROOT (use --root, $AGENTS_ROOT, or superhermes.conf)")
+
+
+def discover_agents(root):
+    out = []
+    if not root.is_dir():
+        sys.exit(f"verify-fleet: AGENTS_ROOT not a directory: {root}")
+    for d in sorted(root.iterdir()):
+        if not d.is_dir() or d.name.startswith((".", "_")) or d.name == "Shared":
+            continue
+        profiles = d / ".hermes" / "profiles"
+        if not profiles.is_dir():
+            continue
+        # the agent's own profile = the profile dir whose config.yaml exists and
+        # matches the lowercased agent name (skip *-staging etc.)
+        slug = d.name.lower().replace("divinci", "divinci")  # identity; slug = lower(name)
+        if (profiles / slug / "config.yaml").exists():
+            out.append((d.name, slug, d))
+    return out
+
+
+def git(root, *args):
+    try:
+        return subprocess.run(["git", "-C", str(root), *args], text=True,
+                              capture_output=True, timeout=30).stdout
+    except Exception:
+        return ""
+
+
+def check_agent(name, slug, root, rpt, config_versions):
+    print(f"\n{C['H']}━━ {name} ({slug}) ━━{C['x']}")
+    profile = root / ".hermes" / "profiles" / slug
+
+    # 1. structure / isolation
+    sb = root / ".hermes" / "sandbox" / f"{slug}.sb"
+    rpt.line("P" if sb.exists() else "F", name, f"sandbox profile {slug}.sb", "" if sb.exists() else "MISSING")
+
+    # 2. own GBrain wrapper + config points at own pglite (not shared)
+    wrap = root / ".local" / "bin" / "gbrain"
+    if not (wrap.exists() and os.access(wrap, os.X_OK)):
+        rpt.line("F", name, "own GBrain wrapper (.local/bin/gbrain)", "MISSING or not executable")
+    else:
+        rpt.line("P", name, "own GBrain wrapper present")
+    cfg = profile / "home" / ".gbrain" / "config.json"
+    if cfg.exists():
+        try:
+            gc = json.loads(cfg.read_text())
+            db = gc.get("database_path", "")
+            if "Shared/" in db or "/.gbrain/" not in db:
+                rpt.line("F", name, "GBrain store path", f"not profile-isolated: {db}")
+            else:
+                rpt.line("P", name, "GBrain store profile-isolated")
+        except Exception as e:
+            rpt.line("F", name, "GBrain config.json parse", str(e))
+    else:
+        rpt.line("W", name, "GBrain config.json", "not found")
+
+    # 3. no stale shared-wrapper references in scripts
+    scripts = profile / "scripts"
+    bad_shared = []
+    if scripts.is_dir():
+        for f in scripts.rglob("*"):
+            if f.is_file():
+                try:
+                    if "Shared/bin/gbrain" in f.read_text(errors="ignore"):
+                        bad_shared.append(f.name)
+                except Exception:
+                    pass
+    rpt.line("F" if bad_shared else "P", name, "no shared-wrapper (Shared/bin/gbrain) refs in scripts",
+             ", ".join(bad_shared))
+
+    # 4 & 5. cron referential integrity + no retired-system refs
+    jobs_path = profile / "cron" / "jobs.json"
+    missing_scripts, localmem_jobs = [], []
+    if jobs_path.exists():
+        try:
+            jobs = json.loads(jobs_path.read_text()).get("jobs", [])
+        except Exception as e:
+            jobs = []
+            rpt.line("F", name, "cron/jobs.json parse", str(e))
+        for j in jobs:
+            scr = j.get("script")
+            if scr and not (scripts / scr).exists():
+                missing_scripts.append(f"{j.get('name','?')} → {scr}")
+            prompt = j.get("prompt") or ""
+            # Only flag references to the agent's OWN profile scripts dir — a bare
+            # "scripts/x.sh" usually points inside a project repo the agent builds,
+            # not a profile cron script. (Caught the real iris_auto_commit.sh bug,
+            # whose prompt said ~/.hermes/profiles/iris/scripts/iris_auto_commit.sh.)
+            for m in re.findall(r"profiles/[\w-]+/scripts/([\w.-]+\.(?:sh|py))", prompt):
+                if not (scripts / m).exists():
+                    missing_scripts.append(f"{j.get('name','?')} → profile scripts/{m}")
+            if j.get("enabled") and re.search(r"localmem_(profile|forget)", prompt):
+                localmem_jobs.append(j.get("name", "?"))
+        rpt.line("F" if missing_scripts else "P", name, "cron scripts all exist",
+                 "; ".join(dict.fromkeys(missing_scripts)))
+        rpt.line("F" if localmem_jobs else "P", name, "no retired-LocalMem refs in active crons",
+                 ", ".join(localmem_jobs))
+        # baseline coverage (advisory): a memory-maintenance job + a git-sync job
+        blob = " ".join((j.get("name", "") + " " + (j.get("script") or "") + " " + (j.get("skill") or "")).lower()
+                        for j in jobs if j.get("enabled"))
+        for present, label in [
+            (re.search(r"maintenance|consolidat|hygiene|memory_health_snapshot|memory-architecture", blob), "memory maintenance"),
+            ("git-sync" in blob, "git-sync"),
+        ]:
+            rpt.line("P" if present else "W", name, f"baseline cron present: {label}",
+                     "" if present else "missing")
+    else:
+        rpt.line("W", name, "cron/jobs.json", "not found")
+
+    # 6. git repo + normalised gitignore + no tracked secrets/bloat
+    if (root / ".git").is_dir():
+        gi = root / ".gitignore"
+        if gi.exists() and "SuperHermes normalised standard" in gi.read_text():
+            rpt.line("P", name, "normalised .gitignore present")
+        else:
+            rpt.line("F", name, "normalised .gitignore", "missing or non-standard")
+        tracked = [t for t in git(root, "ls-files").splitlines() if t]
+        leaks = [t for t in tracked
+                 if t != ".hermes/profiles/%s/honcho.json" % slug
+                 and (SECRET_FILE_RE.search(t) or BINARY_TRACKED_RE.search(t) or TRACKED_TREE_DENY_RE.search(t))]
+        rpt.line("F" if leaks else "P", name, "no secrets/binaries/excluded-trees tracked",
+                 f"{len(leaks)} offending: " + ", ".join(leaks[:5]) if leaks else "")
+        if len(tracked) > TRACKED_WARN_THRESHOLD:
+            rpt.line("W", name, "tracked-file count sane", f"{len(tracked)} files (>{TRACKED_WARN_THRESHOLD})")
+        else:
+            rpt.line("P", name, f"tracked-file count sane ({len(tracked)})")
+    else:
+        rpt.line("F", name, "root git repo (.git)", "MISSING")
+
+    # 7. honcho.json present + parses
+    hj = profile / "honcho.json"
+    if hj.exists():
+        try:
+            json.loads(hj.read_text())
+            rpt.line("P", name, "honcho.json present + valid")
+        except Exception as e:
+            rpt.line("F", name, "honcho.json parse", str(e))
+    else:
+        rpt.line("F", name, "honcho.json", "MISSING")
+
+    # 8. config version (collect for cross-fleet consistency check)
+    conf = profile / "config.yaml"
+    if conf.exists():
+        m = re.search(r"_config_version:\s*(\d+)", conf.read_text())
+        config_versions[name] = m.group(1) if m else "?"
+    else:
+        rpt.line("F", name, "config.yaml", "MISSING")
+
+    # 9. gateway plist KeepAlive (macOS; soft — skip if absent)
+    plist = Path.home() / "Library" / "LaunchAgents" / f"ai.hermes.gateway-{slug}.plist"
+    if plist.exists():
+        try:
+            ka = plistlib.loads(plist.read_bytes()).get("KeepAlive")
+            ok = ka is True or (isinstance(ka, dict) and ka)
+            rpt.line("P" if ka is True else "W", name, "gateway plist KeepAlive: true",
+                     "" if ka is True else f"is {ka!r} (expected true)")
+        except Exception as e:
+            rpt.line("W", name, "gateway plist parse", str(e))
+
+
+def main():
+    global QUIET
+    ap = argparse.ArgumentParser(description="Verify SuperHermes invariants across a fleet.")
+    ap.add_argument("--root"); ap.add_argument("--agent"); ap.add_argument("--quiet", action="store_true")
+    args = ap.parse_args()
+    QUIET = args.quiet
+    repo = Path(__file__).resolve().parent.parent
+    root = resolve_root(args, repo)
+    agents = discover_agents(root)
+    if args.agent:
+        agents = [a for a in agents if a[0].lower() == args.agent.lower()]
+        if not agents:
+            sys.exit(f"verify-fleet: agent '{args.agent}' not found under {root}")
+
+    print(f"{C['H']}SuperHermes fleet check{C['x']}  root={root}  agents={len(agents)}")
+    rpt = Report()
+    config_versions = {}
+    for name, slug, droot in agents:
+        check_agent(name, slug, droot, rpt, config_versions)
+
+    # cross-fleet: config version consistency
+    print(f"\n{C['H']}━━ fleet-wide ━━{C['x']}")
+    vers = set(config_versions.values())
+    if len(vers) <= 1:
+        rpt.line("P", "*", f"config versions consistent ({', '.join(vers) or 'n/a'})")
+    else:
+        detail = ", ".join(f"{a}={v}" for a, v in sorted(config_versions.items()))
+        rpt.line("F", "*", "config versions consistent across fleet", f"DRIFT: {detail}")
+
+    print(f"\n{C['H']}Summary{C['x']}  "
+          f"{C['P']}{rpt.passes} pass{C['x']}  {C['W']}{rpt.warns} warn{C['x']}  {C['F']}{rpt.fails} fail{C['x']}")
+    sys.exit(1 if rpt.fails else 0)
+
+
+if __name__ == "__main__":
+    main()
