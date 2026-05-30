@@ -54,12 +54,23 @@ GBrain is the semantic/wiki brain. Use it for curated long-term knowledge, proje
 
 GBrain indexes markdown under `vault/brain/`. It is not merely a folder; it has a runtime store, index, embeddings, and optionally MCP tools.
 
-## Layer 4 — Hygiene and consolidation
+## Layer 4 — Memory maintenance (consolidation + hygiene)
 
-A mature profile has recurring jobs:
+A mature profile runs **one daily memory-maintenance cron** that does both jobs in
+a single snapshot-fed LLM run. A small read-only `memory_health_snapshot` script
+(the cron's `script:`, default mode) gathers *real* vault/GBrain/Honcho numbers via
+the agent's **own** wrapper and injects them as context, so the agent works from
+ground truth, not guesses. The run then:
 
-1. **Consolidation** — review recent sessions and write durable facts into GBrain.
-2. **Hygiene** — scan for poison, stale facts, identity drift, broken retrieval, and duplicate/conflicting memory.
+1. **Consolidates** — reviews recent sessions (incl. messaging) + Honcho/cron
+   outputs and writes durable facts into curated GBrain pages.
+2. **Hygiene** — scans both layers for poison, stale facts, identity drift, broken
+   retrieval, duplicate/conflicting memory, and CLI↔MCP split-brain.
+
+Keeping it one job (not two) shares the snapshot context and halves the token cost.
+It is scheduled just before the nightly identity git-sync so the backup captures
+the new pages. (The deterministic git-sync stays a *separate* `no_agent` job — a
+backup must run even if the LLM maintenance run fails.)
 
 ## Deprecated memory stores
 
