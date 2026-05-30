@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+# ============================================================================
+# Normalised agent git-sync (SuperHermes standard).
+#
+# Backs up the agent's durable identity to its own private git repo, once a day.
+# The default-deny .gitignore guarantees ONLY identity files can ever be staged
+# (config, soul, memory, crons, scripts, sandbox, README) — never secrets,
+# caches, the Honcho stack, the GBrain store, the vault, or workspace clones.
+# So this stays tiny: stage-all, secret-tripwire, commit, push.
+#
+# Properties:
+#   • Idempotent — no diff → no commit, no noise.
+#   • Safe in unattended cron — NEVER force-pushes. If the remote diverged
+#     (rare; the agent is the sole writer of its own repo) it rebases once and
+#     retries; on any failure it keeps the local commit and warns.
+#   • Fails closed on a suspected secret pasted into a tracked file.
+#
+# OUTPUT CONTRACT (runs as a no_agent cron job → stdout is delivered verbatim to
+# the human, empty stdout = silent). So this stays SILENT on success / no-op and
+# ONLY prints when the human needs to act: a push failure or a caught secret.
+# A non-zero exit additionally raises a Hermes error alert.
+#
+# Normalised, not centralised: every agent runs this same logic from its own
+# copy. Regenerate from SuperHermes/templates/git-sync.sh.tmpl.
+#   agent: __AGENT_NAME__ (slug __AGENT_SLUG__)
+# ============================================================================
+set -euo pipefail
+
+ROOT="${AGENT_GIT_ROOT:-__AGENT_ROOT__}"
+NAME="__AGENT_NAME__"
+SLUG="__AGENT_SLUG__"
+BRANCH="${AGENT_GIT_BRANCH:-main}"
+SCRATCH="${TMPDIR:-/tmp}/${SLUG}-gitsync-secrets.txt"
+
+cd "$ROOT" 2>/dev/null || { echo "git-sync: no directory at $ROOT"; exit 1; }
+[ -d .git ] || { echo "git-sync: $ROOT is not a git repo"; exit 1; }
+
+git add -A
+
+# No changes → silent success.
+git diff --cached --quiet && exit 0
+
+# Secret tripwire. The .gitignore stops secret *files*, but a token could be
+# pasted INTO a tracked file (a memory note, config, script). Scan ADDED lines
+# for concrete credential formats only (high-confidence — no key=value heuristic
+# that would false-positive and silently halt the daily backup).
+if git diff --cached -U0 | grep -E '^\+' \
+   | grep -IEn 'gh[pousr]_[A-Za-z0-9_]{30,}|sk-[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9-]{20,}|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----' \
+   > "$SCRATCH" 2>/dev/null; then
+  git reset -q
+  echo "git-sync: ABORTED — possible secret in staged diff (see $SCRATCH)"
+  exit 2
+fi
+rm -f "$SCRATCH" 2>/dev/null || true
+
+git -c user.name="$NAME" -c user.email="${SLUG}@agents.local" \
+    commit -q -m "auto: $NAME identity sync ($(date -u +'%Y-%m-%d %H:%M UTC'))"
+
+# Push only if a remote exists. Never force in unattended cron. Silent on
+# success; speaks up only if the push can't be completed.
+if git remote get-url origin >/dev/null 2>&1; then
+  if ! git push -q origin "$BRANCH" 2>/dev/null; then
+    git fetch -q origin "$BRANCH" 2>/dev/null || true
+    if ! { git rebase -q "origin/$BRANCH" 2>/dev/null && git push -q origin "$BRANCH" 2>/dev/null; }; then
+      git rebase --abort 2>/dev/null || true
+      echo "$NAME git-sync: committed locally but PUSH FAILED — resolve: git -C $ROOT push origin $BRANCH"
+    fi
+  fi
+fi
+# (silent on full success — no_agent cron stays quiet unless action is needed)
