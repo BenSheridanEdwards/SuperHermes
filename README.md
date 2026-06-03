@@ -76,7 +76,9 @@ own system.
 
 ### 1. Isolation — a private home in a shared town square
 Each agent lives at `AGENTS_ROOT/<Name>/` with its **own** `.home`, caches, `tmp`,
-`workspace`, `vault`, and Hermes profile. The gateway runs with `HOME`, `TMPDIR`,
+`workspace`, `vault`, and Hermes profile. `workspace/` is scratch and active
+project work; `vault/` is durable private knowledge, with `vault/brain/` reserved
+for curated GBrain source markdown. The gateway runs with `HOME`, `TMPDIR`,
 `XDG_CACHE_HOME`, `NPM_CONFIG_CACHE` all pointed inside that tree. No agent writes
 into another's home.
 

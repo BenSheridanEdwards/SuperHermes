@@ -73,6 +73,8 @@ assert_has "$out" "root .gitignore"          "renders normalised root .gitignore
 assert_has "$out" "git initialised at root"  "initialises git at root"
 assert_has "$out" "memory-maintenance"        "renders memory-maintenance cron"
 assert_has "$out" "DRY-RUN complete"         "completes cleanly"
+python3 -m json.tool "$REPO/templates/agent-template.json" >/dev/null 2>&1 \
+  && ok "agent template manifest parses" || bad "agent template manifest parses"
 AGENTS_ROOT=""; [ -f "$REPO/superhermes.conf" ] && . "$REPO/superhermes.conf" || . "$REPO/superhermes.conf.example"
 [ -d "${AGENTS_ROOT:-/nonexistent}/TestUnit" ] && bad "dry-run left a real agent dir!" || ok "dry-run leaves no real agent dir"
 
