@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "name": "SuperHermes agent anatomy",
+  "summary": "One isolated Hermes agent with durable identity, private runtime, and a separate knowledge vault.",
+  "command": {
+    "program": "Shared/SuperHermes/bin/new-agent",
+    "args": ["--name", "<Name>", "--camp", "<camp>", "--tier", "<s|m|l>"],
+    "dry_run_args": ["--dry-run"],
+    "no_start_args": ["--no-start"]
+  },
+  "required_paths": [
+    { "path": ".hermes/profiles/<slug>/config.yaml", "kind": "identity", "tracked": true, "purpose": "Hermes runtime config with model, memory, tools, approvals, and MCP wiring." },
+    { "path": ".hermes/profiles/<slug>/SOUL.md", "kind": "identity", "tracked": true, "purpose": "Agent persona, scope, and trust boundary." },
+    { "path": ".hermes/profiles/<slug>/memories/MEMORY.md", "kind": "bootstrap", "tracked": true, "purpose": "Tiny always-loaded agent memory." },
+    { "path": ".hermes/profiles/<slug>/memories/USER.md", "kind": "bootstrap", "tracked": true, "purpose": "Tiny always-loaded user profile." },
+    { "path": ".hermes/profiles/<slug>/honcho.json", "kind": "memory", "tracked": true, "purpose": "Honcho host, workspace, peer, and recall settings." },
+    { "path": ".hermes/profiles/<slug>/cron/jobs.json", "kind": "automation", "tracked": true, "purpose": "Scheduled jobs with approval gates." },
+    { "path": ".hermes/profiles/<slug>/scripts/", "kind": "automation", "tracked": true, "purpose": "Profile-local maintained scripts." },
+    { "path": ".hermes/sandbox/<slug>.sb", "kind": "isolation", "tracked": true, "purpose": "Town-square macOS sandbox profile." },
+    { "path": ".local/bin/gbrain", "kind": "memory", "tracked": false, "purpose": "Agent-owned GBrain wrapper." },
+    { "path": ".hermes/profiles/<slug>/home/.gbrain/config.json", "kind": "memory", "tracked": false, "purpose": "Profile-isolated GBrain pglite config." },
+    { "path": "vault/", "kind": "knowledge", "tracked": false, "purpose": "Private durable knowledge vault. This is the whole-vault root." },
+    { "path": "vault/brain/", "kind": "knowledge", "tracked": false, "purpose": "Curated GBrain source markdown." },
+    { "path": "workspace/", "kind": "work", "tracked": false, "purpose": "Scratch work, project clones, builds, and experiments." }
+  ],
+  "vault_standard": [
+    { "path": "vault/brain/", "purpose": "Curated semantic memory source." },
+    { "path": "vault/research/", "purpose": "Research notes and investigation material." },
+    { "path": "vault/assets/", "purpose": "Supporting files for deliverables." },
+    { "path": "vault/sources/", "purpose": "Captured source material." },
+    { "path": "vault/logs/", "purpose": "Durable narrative run logs." },
+    { "path": "vault/published/", "purpose": "Local copies of shipped artifacts." }
+  ],
+  "excluded_roots": [
+    "vault/",
+    "workspace/",
+    ".home/",
+    ".cache/",
+    ".npm/",
+    ".local/",
+    ".ollama/",
+    "tmp/",
+    ".hermes/honcho/"
+  ]
+}

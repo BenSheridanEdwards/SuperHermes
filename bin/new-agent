@@ -114,8 +114,11 @@ if [ "$DRYRUN" = 1 ]; then TMP="$(mktemp -d)"; AGENT_ROOT="$TMP/$NAME"; export A
 say "1/8  directory skeleton"
 mkdir -p "$PROFILE"/{cron,scripts,logs,memories,home/.gbrain} "$AGENT_ROOT/.hermes/sandbox" \
   "$HONCHO_DIR"/{honcho,scripts,backups} "$AGENT_ROOT/.home/.gbrain" \
-  "$AGENT_ROOT"/{.cache,.npm,.ollama,tmp,workspace} "$AGENT_ROOT/vault/research" \
+  "$AGENT_ROOT"/{.cache,.npm,.ollama,tmp,workspace} \
+  "$AGENT_ROOT/vault"/{research,assets,sources,logs,published} \
   "$AGENT_ROOT/vault/brain"/{people,projects,guides,tech,daily,companies,concepts,meetings,sources}
+render "$REPO/templates/vault.README.md.tmpl" > "$AGENT_ROOT/vault/README.md"
+render "$REPO/templates/workspace.README.md.tmpl" > "$AGENT_ROOT/workspace/README.md"
 ok "tree under $AGENT_ROOT"
 
 # ---- 2. sandbox -------------------------------------------------------------
