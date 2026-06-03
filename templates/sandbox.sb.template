@@ -1,61 +1,28 @@
 (version 1)
-(import "system.sb")
 
-;; ============================================================================
-;; SuperHermes "town-square" sandbox for __AGENT_NAME__.
+;; SuperHermes minimal sandbox for __AGENT_NAME__.
 ;;
-;; Model: the shared user account is a town square. Each agent home under
-;; __AGENTS_ROOT__/<Name> is private. Agents have free reign over the account
-;; EXCEPT:
-;;   1. Other agents' homes are READ-ONLY  (look through the window, don't enter)
-;;   2. Operator-protected paths are OFF-LIMITS  (configured: PROTECTED_PATHS)
-;;   3. Optional need-to-know paths are restricted to named readers  (VAULT_*)
+;; Boundary requested by Chief:
+;; - Allow normal macOS, browser, GPU, app, temp, and runtime operations.
+;; - Do not read or write /Users/Shared.
+;; - Do not read or write other macOS user homes.
+;; - Do not write in another agent's root under __AGENTS_ROOT__.
 ;;
-;; Allow-all-then-deny (not an allowlist) so normal tooling never breaks; the OS
-;; (SIP / file permissions) still applies underneath.
-;;
-;; Rendered by `bin/new-agent` from this template. Do not hand-edit per-agent
-;; copies — change the template and re-render.
-;; ============================================================================
+;; This is not a filesystem allowlist and does not confine the agent to
+;; /Users/agents.
 
-(deny default)
+(allow default)
 
-;; --- Runtime: full capability inside the town square ---
-(allow process*)
-(allow process-info*)
-(allow signal)
-(allow system-info)
-(allow sysctl-read)
-(allow sysctl-write)
-(system-network)
-(allow network*)
-(allow mach*)
-(allow mach-lookup)
-(allow ipc-posix-shm*)
-(allow iokit-open)
-(allow distributed-notification-post)
+;; Native GUI/rendering tools create their own macOS sandboxes. Do not make them
+;; inherit the Hermes file sandbox, or QuickLook/Chromium sandbox init fails.
+(allow process-exec* (with no-sandbox)
+  (subpath "/System/Library/Frameworks/QuickLook.framework")
+  (subpath "/Applications/Brave Browser.app"))
 
-;; Dynamic PTYs (terminal-backed tools, test runners).
-(allow file-read* file-write* file-ioctl (literal "/dev/ptmx"))
-(allow file-read* file-write* file-ioctl
-  (regex #"^/dev/ttys[0-9]*")
-  (extension "com.apple.sandbox.pty"))
+;; macOS user boundary.
+(deny file* (literal "/Users/Shared"))
+(deny file* (subpath "/Users/Shared"))
+__OTHER_USER_HOME_RULES__
 
-;; --- Reads: everything (carve-outs below) ---
-(allow file-read*)
-
-;; --- Writes: everything (carve-outs below) ---
-(allow file-write*)
-
-;; ===== Carve-out 1: other agents' homes are read-only =====
-;; Deny writes inside ANY agent home, then re-grant this agent's own home.
-;; (Reads stay allowed by the global file-read* above — the "window".)
-(deny file-write* (regex #"^__AGENTS_ROOT__/[^/]+(/|$)"))
-(allow file-write* (subpath "__AGENT_ROOT__"))
-__COMMON_RULES__
-
-;; ===== Carve-out 2: operator-protected paths (off-limits) =====
-__PROTECTED_RULES__
-
-;; ===== Carve-out 3: optional need-to-know paths =====
-__VAULT_RULES__
+;; Agent boundary: reads are allowed, writes into other agent roots are not.
+__OTHER_AGENT_WRITE_RULES__

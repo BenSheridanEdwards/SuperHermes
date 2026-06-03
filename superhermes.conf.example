@@ -17,16 +17,6 @@ HERMES_VENV="$HOME/.hermes/hermes-agent/venv"
 # of the bundled generic templates. Leave blank to use bundled templates.
 REF_AGENT=""
 
-# Common dirs (e.g. a shared ops folder) that stay read+write for every agent
-# even though they live under AGENTS_ROOT. Space-separated. Leave blank for none.
-COMMON_DIRS=""
-
-# ── Sandbox carve-outs (optional; town-square model) ─────────────────────────
-# Absolute paths the sandbox must DENY to every agent (e.g. the human operator's
-# own macOS home). Space-separated. Leave blank for none.
-PROTECTED_PATHS=""
-
-# Optional "need-to-know" path: readable only by the agents listed in
-# VAULT_READERS (space-separated slugs); denied to all others. Leave blank to skip.
-VAULT_PATH=""
-VAULT_READERS=""
+# Sandbox policy is intentionally not configurable here. Generated profiles use
+# allow-default and enforce only: no /Users/Shared access, no other macOS user
+# homes, and no writes into another agent root under AGENTS_ROOT.

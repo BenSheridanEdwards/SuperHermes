@@ -6,18 +6,20 @@
 # The default-deny .gitignore guarantees ONLY identity files can ever be staged
 # (config, soul, memory, crons, scripts, sandbox, README) — never secrets,
 # caches, the Honcho stack, the GBrain store, the vault, or workspace clones.
-# So this stays tiny: stage-all, secret-tripwire, commit, push.
+# So this stays tiny: stage-all, secret-tripwire, commit, then hold any
+# GitHub push for explicit approval.
 #
 # Properties:
 #   • Idempotent — no diff → no commit, no noise.
-#   • Safe in unattended cron — NEVER force-pushes. If the remote diverged
-#     (rare; the agent is the sole writer of its own repo) it rebases once and
-#     retries; on any failure it keeps the local commit and warns.
+#   • Safe in unattended cron — NEVER pushes to GitHub by default. Set
+#     AGENT_GIT_SYNC_PUSH_APPROVED=1 only from a Chief-approved/manual run to
+#     push. It never force-pushes.
 #   • Fails closed on a suspected secret pasted into a tracked file.
 #
 # OUTPUT CONTRACT (runs as a no_agent cron job → stdout is delivered verbatim to
 # the human, empty stdout = silent). So this stays SILENT on success / no-op and
-# ONLY prints when the human needs to act: a push failure or a caught secret.
+# ONLY prints when the human needs to act: a GitHub push is waiting for
+# approval, a push failed after approval, or a secret was caught.
 # A non-zero exit additionally raises a Hermes error alert.
 #
 # Normalised, not centralised: every agent runs this same logic from its own
@@ -35,10 +37,31 @@ SCRATCH="${TMPDIR:-/tmp}/${SLUG}-gitsync-secrets.txt"
 cd "$ROOT" 2>/dev/null || { echo "git-sync: no directory at $ROOT"; exit 1; }
 [ -d .git ] || { echo "git-sync: $ROOT is not a git repo"; exit 1; }
 
+push_if_approved() {
+  git remote get-url origin >/dev/null 2>&1 || return 0
+  if [ "${AGENT_GIT_SYNC_PUSH_APPROVED:-0}" != "1" ]; then
+    echo "$NAME git-sync: committed locally; GitHub push withheld pending approval - run: AGENT_GIT_SYNC_PUSH_APPROVED=1 $0"
+    return 0
+  fi
+  if ! git push -q origin "$BRANCH" 2>/dev/null; then
+    git fetch -q origin "$BRANCH" 2>/dev/null || true
+    if ! { git rebase -q "origin/$BRANCH" 2>/dev/null && git push -q origin "$BRANCH" 2>/dev/null; }; then
+      git rebase --abort 2>/dev/null || true
+      echo "$NAME git-sync: committed locally but PUSH FAILED - resolve: git -C $ROOT push origin $BRANCH"
+    fi
+  fi
+}
+
 git add -A
 
-# No changes → silent success.
-git diff --cached --quiet && exit 0
+# No changes -> silent success, unless a manual approved run is flushing
+# previously committed local backups to GitHub.
+if git diff --cached --quiet; then
+  if [ "${AGENT_GIT_SYNC_PUSH_APPROVED:-0}" = "1" ]; then
+    push_if_approved
+  fi
+  exit 0
+fi
 
 # Secret tripwire. The .gitignore stops secret *files*, but a token could be
 # pasted INTO a tracked file (a memory note, config, script). Scan ADDED lines
@@ -56,15 +79,5 @@ rm -f "$SCRATCH" 2>/dev/null || true
 git -c user.name="$NAME" -c user.email="${SLUG}@agents.local" \
     commit -q -m "auto: $NAME identity sync ($(date -u +'%Y-%m-%d %H:%M UTC'))"
 
-# Push only if a remote exists. Never force in unattended cron. Silent on
-# success; speaks up only if the push can't be completed.
-if git remote get-url origin >/dev/null 2>&1; then
-  if ! git push -q origin "$BRANCH" 2>/dev/null; then
-    git fetch -q origin "$BRANCH" 2>/dev/null || true
-    if ! { git rebase -q "origin/$BRANCH" 2>/dev/null && git push -q origin "$BRANCH" 2>/dev/null; }; then
-      git rebase --abort 2>/dev/null || true
-      echo "$NAME git-sync: committed locally but PUSH FAILED — resolve: git -C $ROOT push origin $BRANCH"
-    fi
-  fi
-fi
+push_if_approved
 # (silent on full success — no_agent cron stays quiet unless action is needed)
