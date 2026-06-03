@@ -83,13 +83,23 @@ for curated GBrain source markdown. The gateway runs with `HOME`, `TMPDIR`,
 into another's home.
 
 ### 2. Sandbox — the town-square model
-Enforced by macOS `sandbox-exec`, **allow-all-then-deny** (not a brittle allowlist,
-so PTYs / temp / Docker / browsers never break). The agent has free reign over the
-shared account with exactly three carve-outs:
+Enforced by macOS `sandbox-exec`, **allow-default-then-deny** (not a brittle
+allowlist, so PTYs / temp / Docker / browsers never break). The agent can use
+normal macOS, browser, GPU, app, temp, and runtime paths. It is **not** confined
+to `/Users/agents`.
 
-1. **Other agents' homes are read-only** — look through the window, don't enter.
-2. **Operator-protected paths are off-limits** — e.g. the human's own macOS home.
-3. **Optional need-to-know paths** — readable only by named agents.
+The file sandbox enforces only these boundaries:
+
+1. **No writes to other agent roots** under `AGENTS_ROOT/<Name>/`.
+2. **No access to other macOS user homes**.
+3. **No read or write access to `/Users/Shared`**.
+
+QuickLook and Brave are launched without inheriting the Hermes sandbox because
+they initialize their own macOS sandboxes; inheriting this profile breaks visual
+QA and browser/GPU paths.
+
+Approval before email or destructive GitHub actions is a tool/workflow policy,
+not a filesystem sandbox rule.
 
 The OS sandbox is the **sole** write boundary. Do **not** set
 `HERMES_WRITE_SAFE_ROOT` — it's an app-level approval gate that only adds friction

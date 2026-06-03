@@ -17,14 +17,20 @@ made the whole fleet depend on that one agent — wipe its cache and others brok
 Independence means a failure in one agent can't cascade.
 
 ### 2. The sandbox is the sole write boundary — "town-square," allow-all-then-deny
-**Decision.** The OS sandbox (`sandbox-exec`) grants free reign over the shared
-account, denying only three things: other agents' homes (read-only), the operator's
-own profile, and any need-to-know vault. Not an allowlist.
+**Decision.** The OS sandbox (`sandbox-exec`) grants free reign over normal
+macOS, browser, GPU, app, temp, and runtime paths. It denies only file boundaries:
+no writes to another agent root, no access to another macOS user home, and no
+access to `/Users/Shared`. It is not an allowlist and does not confine agents to
+`/Users/agents`.
 
 **Why.** Allowlist sandboxes drift and break ordinary tooling (PTYs, temp dirs,
-Docker) — every new tool needs a new rule. The real boundary is narrow and stable:
-*don't enter another home, the human, or the vault.* Express that as three denials
-and nothing legitimate ever breaks.
+Docker, GUI browsers) — every new tool needs a new rule. The real filesystem
+boundary is narrow and stable: do not write in another agent root, do not cross
+into another macOS user, and do not use `/Users/Shared`. Email and destructive
+GitHub approvals are enforced at the tool/workflow layer, not by file paths.
+QuickLook and Brave get explicit `process-exec` no-sandbox exceptions because
+they create their own native macOS sandboxes; forcing them to inherit the Hermes
+profile breaks screenshots and browser/GPU flows.
 
 ### 3. No application-level write gate (`HERMES_WRITE_SAFE_ROOT`)
 **Decision.** Do not set the Hermes write-approval gate.
