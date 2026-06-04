@@ -2,7 +2,7 @@
 # ============================================================================
 # new-agent — spin up a new SuperHermes agent from one command.
 #
-# Provisions the full anatomy (see docs 00-10): profile dirs · town-square
+# Provisions the full anatomy (see README + docs/): profile dirs · town-square
 # sandbox · gateway + honcho-backup launchd plists · Hermes profile
 # (config.yaml, honcho.json, SOUL stub) · Honcho Docker stack (compose + .env +
 # backup, auto-allocated ports) · GBrain config + vault · shared-skills wiring.
