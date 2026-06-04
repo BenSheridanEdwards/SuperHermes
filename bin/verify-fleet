@@ -282,9 +282,14 @@ def check_agent(name, slug, root, rpt, config_versions):
     if plist.exists():
         try:
             ka = plistlib.loads(plist.read_bytes()).get("KeepAlive")
-            ok = ka is True or (isinstance(ka, dict) and ka)
-            rpt.line("P" if ka is True else "W", name, "gateway plist KeepAlive: true",
-                     "" if ka is True else f"is {ka!r} (expected true)")
+            # Accept either the literal `true` or a launchd restart-policy dict.
+            # The fleet standardised on {SuccessfulExit: false} — restart on
+            # crash, but honour a clean drain/shutdown so an intentional restart
+            # isn't fought. Both keep the gateway up; only an absent/empty
+            # KeepAlive is a real miss.
+            ok = ka is True or (isinstance(ka, dict) and len(ka) > 0)
+            rpt.line("P" if ok else "W", name, "gateway plist KeepAlive (restart-on-crash)",
+                     "" if ok else f"is {ka!r} (expected true or a restart-policy dict)")
         except Exception as e:
             rpt.line("W", name, "gateway plist parse", str(e))
 

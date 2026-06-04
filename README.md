@@ -108,8 +108,10 @@ already enforces the real rule.
 
 ### 3. Runtime — the gateway under launchd
 A `launchd` job runs `sandbox-exec -f <agent>.sb … hermes_cli … gateway run`, with
-`KeepAlive: true`. Reload with `launchctl kickstart -k` (config change) or
-`bootout`+`bootstrap` (plist change).
+`KeepAlive` set to restart the gateway on crash — either `true` or, as the fleet
+standardised, `{SuccessfulExit: false}` (restart unless it exited cleanly, so an
+intentional drain/restart isn't fought). Reload with `launchctl kickstart -k`
+(config change) or `bootout`+`bootstrap` (plist change).
 
 ### 4. Memory — two durable layers, each verified separately
 - **Bootstrap** — small, always-loaded `MEMORY.md` + `USER.md`. High-signal, tiny.
