@@ -1,0 +1,77 @@
+#!/usr/bin/env python3
+# ============================================================================
+# ensure-gbrain-mcp — idempotently guarantee an agent's config.yaml has a
+# correct mcp_servers.gbrain block: own wrapper + `serve` + enabled: true.
+#
+# Why this exists: new-agent's clone path only *rewrote* an existing
+# `command: .../gbrain` via sed — so cloning an agent that lacked the block (or
+# had enabled:false) produced a new agent with no/disabled GBrain. That is how
+# Iris and Jarvis ended up with no block. This normalizer makes the correct
+# block a guaranteed post-condition, regardless of how config.yaml was built.
+#
+# Idempotent: a config that is already correct is left byte-for-byte unchanged.
+#
+# Usage:  ensure-gbrain-mcp <config.yaml> <agent_root>
+# Exit:   0 = already correct or fixed; 2 = usage error
+# ============================================================================
+import sys
+from pathlib import Path
+
+def main():
+    if len(sys.argv) != 3:
+        sys.exit("usage: ensure-gbrain-mcp <config.yaml> <agent_root>")
+    cfg = Path(sys.argv[1]); root = sys.argv[2].rstrip("/")
+    wrapper = f"{root}/.local/bin/gbrain"
+    want = [
+        "  gbrain:",
+        f"    command: {wrapper}",
+        "    args:",
+        "    - serve",
+        "    enabled: true",
+    ]
+    lines = cfg.read_text().splitlines()
+
+    # locate top-level `mcp_servers:` (col-0 key)
+    mcp_i = next((i for i, l in enumerate(lines) if l.rstrip() == "mcp_servers:"), None)
+    if mcp_i is None:
+        # no mcp_servers section at all — append one with the gbrain block
+        if lines and lines[-1].strip():
+            lines.append("")
+        lines += ["mcp_servers:"] + want
+        cfg.write_text("\n".join(lines) + "\n")
+        print(f"ensure-gbrain-mcp: added mcp_servers + gbrain block -> {cfg}")
+        return
+
+    # find the extent of the mcp_servers block (until next col-0 key / EOF)
+    end = len(lines)
+    for j in range(mcp_i + 1, len(lines)):
+        s = lines[j]
+        if s and not s[0].isspace() and not s.lstrip().startswith("#"):
+            end = j; break
+
+    # is there a `  gbrain:` child already?
+    g_i = next((j for j in range(mcp_i + 1, end)
+                if lines[j].rstrip() == "  gbrain:"), None)
+    if g_i is None:
+        lines[mcp_i + 1:mcp_i + 1] = want      # insert right after mcp_servers:
+        cfg.write_text("\n".join(lines) + "\n")
+        print(f"ensure-gbrain-mcp: inserted gbrain block -> {cfg}")
+        return
+
+    # gbrain block exists — its body is the run of 4-space-indented lines that
+    # follow (stop at the first blank / shallower line so we don't swallow the
+    # separator before the next key, which would break idempotency).
+    g_end = g_i + 1
+    for j in range(g_i + 1, end):
+        if lines[j].startswith("    "):
+            g_end = j + 1
+        else:
+            break
+    if lines[g_i:g_end] == want:
+        return                                  # already perfect → no write
+    lines[g_i:g_end] = want
+    cfg.write_text("\n".join(lines) + "\n")
+    print(f"ensure-gbrain-mcp: normalized gbrain block (own wrapper + enabled) -> {cfg}")
+
+if __name__ == "__main__":
+    main()
