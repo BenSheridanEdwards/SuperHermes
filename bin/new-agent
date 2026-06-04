@@ -306,16 +306,22 @@ elif [ "$START" = "yes" ]; then
   curl -fsS "http://127.0.0.1:$API_PORT/health" >/dev/null 2>&1 && ok "honcho api healthy ($API_PORT)" || say "⚠ api not healthy — check: docker compose -p $PROJECT logs"
   # GBrain: install the real v0.41 runtime (profile-isolated) + seed from vault/brain
   # BEFORE the gateway starts (its MCP would lock the pglite store).
+  #
+  # Pin the ref — the framework requires v0.41.x, but upstream HEAD has moved to
+  # 0.42.x. An unpinned `bun add` would silently install the wrong minor and
+  # break the invariant (and reintroduce fleet drift). 248fb7a = 0.41.38.0, the
+  # newest 0.41.x. Bump this ref deliberately, fleet-wide, never per-agent.
+  GBRAIN_REF="github:garrytan/gbrain#248fb7a90f9ce5fe2e5d01fe486345d08834ed40"  # 0.41.38.0
   if command -v bun >/dev/null; then
-    say "installing GBrain v0.41 (profile-isolated)…"
+    say "installing GBrain 0.41.38 (profile-isolated, pinned)…"
     ( export HOME="$PROFILE/home" BUN_INSTALL="$PROFILE/home/.bun" XDG_CACHE_HOME="$PROFILE/home/.cache" PATH="/opt/homebrew/bin:$PROFILE/home/.bun/bin:$PATH"
       mkdir -p "$BUN_INSTALL/bin"
-      bun add -g github:garrytan/gbrain >/dev/null 2>&1 || say "⚠ gbrain install failed — run: bun add -g github:garrytan/gbrain" )
+      bun add -g "$GBRAIN_REF" >/dev/null 2>&1 || say "⚠ gbrain install failed — run: bun add -g $GBRAIN_REF" )
     "$AGENT_ROOT/.local/bin/gbrain" import "$AGENT_ROOT/vault/brain" >/dev/null 2>&1 || true
     "$AGENT_ROOT/.local/bin/gbrain" embed --stale >/dev/null 2>&1 || true
     "$AGENT_ROOT/.local/bin/gbrain" stats 2>/dev/null | grep -iE "^Pages|^Embedded" | sed 's/^/  gbrain /' || true
     ok "GBrain runtime installed + vault seeded"
-  else say "⚠ bun not found — install GBrain manually: bun add -g github:garrytan/gbrain"; fi
+  else say "⚠ bun not found — install GBrain manually: bun add -g $GBRAIN_REF"; fi
   launchctl bootstrap "gui/$(id -u)" "$LA/ai.hermes.gateway-$SLUG.plist" 2>/dev/null || true
   launchctl bootstrap "gui/$(id -u)" "$LA/ai.hermes.honcho.$SLUG.backup.plist" 2>/dev/null || true
   launchctl kickstart -k "gui/$(id -u)/ai.hermes.gateway-$SLUG" 2>/dev/null || true
