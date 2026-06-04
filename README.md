@@ -272,22 +272,15 @@ venv · Bun (GBrain) · Ollama (local embeddings) · Python 3, `bash`.
 
 ## Documentation
 
-The numbered docs are the reference architecture in depth:
+The README is the overview; these go deeper:
 
 | Doc | Topic |
 |-----|-------|
-| `00-executive-summary` | the standard, in brief |
-| `01-profile-layout` | filesystem layout & isolation |
-| `02-config-baseline` | config posture |
-| `03-toolsets-and-permissions` | toolset design & risk model |
-| `04-memory-architecture` | bootstrap + Honcho + GBrain |
-| `05-gbrain-setup` | the canonical v0.41 GBrain build |
-| `06-skills-layer` | skills as procedural memory |
-| `07-cron-and-guardrails` | durable scheduled work + approval gates |
-| `08-operator-modules` | optional Google / meetings / Kanban / voice |
-| `09-housekeeping` | keeping profiles lean |
-| `10-new-agent-scaffolding` | the `new-agent` command in depth |
-| [`ARCHITECTURE.md`](ARCHITECTURE.md) | the durable *why* behind every decision |
+| [docs/building-agents.md](docs/building-agents.md) | profile layout, config baseline, toolsets & risk model, and the `new-agent` scaffolder |
+| [docs/memory-and-skills.md](docs/memory-and-skills.md) | the bootstrap + Honcho + GBrain memory stack, the canonical v0.41 GBrain build, and the skills layer |
+| [docs/operations.md](docs/operations.md) | cron & approval gates, operator modules, and housekeeping |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | the durable *why* behind every decision |
+| [examples/](examples/) | worked rundowns from a live agent (Jeeves) |
 
 ## Contributing
 

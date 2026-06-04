@@ -1,7 +1,7 @@
 # Architecture Decisions
 
 The durable decisions behind SuperHermes — the *why*, not the *what*. The README
-and numbered docs describe how an agent is built today; this file records the
+and the guides in [docs/](docs/) describe how an agent is built today; this file records the
 reasoning that shouldn't change as the implementation evolves. Each entry is a
 decision plus the failure it prevents.
 
