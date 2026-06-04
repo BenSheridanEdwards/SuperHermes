@@ -15,6 +15,7 @@
 #   new-agent --name Sky --camp team --tier m
 #   new-agent --name Sky --no-start            # scaffold only
 #   new-agent --name Sky --dry-run             # render to temp, no side effects
+#   new-agent --name Sky --yes --no-start      # non-interactive scaffold
 #
 # Pauses for the two things it can't autogenerate: credentials (auth.json) and
 # the agent's SOUL/persona. (macOS / launchd / sandbox-exec required to start.)
@@ -44,10 +45,11 @@ sys.stdout.write(re.sub(r"__([A-Z_]+)__", lambda m: os.environ.get(m.group(1), m
 PY
 }
 
-NAME="" CAMP="" TIER="" START="yes" DRYRUN=0
+NAME="" CAMP="" TIER="" START="yes" DRYRUN=0 YES=0
 while [ $# -gt 0 ]; do case "$1" in
   --name) NAME="${2:-}"; shift 2;; --camp) CAMP="${2:-}"; shift 2;; --tier) TIER="${2:-}"; shift 2;;
   --no-start) START="no"; shift;; --start) START="yes"; shift;; --dry-run) DRYRUN=1; shift;;
+  --yes|-y) YES=1; shift;;
   -h|--help) sed -n '2,20p' "$0"; exit 0;; *) die "unknown arg: $1";;
 esac; done
 
@@ -120,7 +122,7 @@ cat <<SUMMARY
   sandbox     allow default; deny /Users/Shared, other user homes, cross-agent writes
   start now   $START$([ "$DRYRUN" = 1 ] && echo "   (DRY-RUN)")
 SUMMARY
-if [ "$DRYRUN" = 0 ]; then read -r -p "Proceed? [y/N] " yn; [[ "$yn" =~ ^[Yy] ]] || die "aborted"; fi
+if [ "$DRYRUN" = 0 ] && [ "$YES" = 0 ]; then read -r -p "Proceed? [y/N] " yn; [[ "$yn" =~ ^[Yy] ]] || die "aborted"; fi
 if [ "$DRYRUN" = 1 ]; then TMP="$(mktemp -d)"; AGENT_ROOT="$TMP/$NAME"; export AGENT_ROOT
   PROFILE="$AGENT_ROOT/.hermes/profiles/$SLUG"; HONCHO_DIR="$AGENT_ROOT/.hermes/honcho"
   export WORKSPACE_CWD="$AGENT_ROOT/workspace"; LA="$TMP/LaunchAgents"; mkdir -p "$LA"; say "dry-run → $TMP"; fi
@@ -211,7 +213,12 @@ JSON
 render "$REPO/templates/gbrain-wrapper.tmpl" > "$AGENT_ROOT/.local/bin/gbrain"
 chmod +x "$AGENT_ROOT/.local/bin/gbrain"
 printf '# %s - GBrain\n\nKnowledge base index.\n' "$NAME" > "$AGENT_ROOT/vault/brain/HOME.md"
-ok "gbrain config (profile-home pglite, /v1) + own wrapper + vault/brain"
+# Guarantee config.yaml carries the correct gbrain MCP block (own wrapper +
+# enabled) regardless of how it was built. The clone path used to only sed an
+# existing `command:`, so cloning an agent that lacked the block produced one
+# with no GBrain MCP — that is how Iris/Jarvis ended up unwired. Idempotent.
+python3 "$REPO/bin/ensure-gbrain-mcp" "$PROFILE/config.yaml" "$AGENT_ROOT" || true
+ok "gbrain config (profile-home pglite, /v1) + own wrapper + MCP block + vault/brain"
 
 # ---- 5. honcho stack --------------------------------------------------------
 say "5/8  Honcho stack"
@@ -313,6 +320,11 @@ elif [ "$START" = "yes" ]; then
   launchctl bootstrap "gui/$(id -u)" "$LA/ai.hermes.honcho.$SLUG.backup.plist" 2>/dev/null || true
   launchctl kickstart -k "gui/$(id -u)/ai.hermes.gateway-$SLUG" 2>/dev/null || true
   ok "launchd registered + gateway kickstarted"
+  # post-create gate: assert this agent's invariants — esp. that GBrain is wired
+  # to its own store AND the brain actually opens — before we call it ready.
+  python3 "$REPO/bin/verify-fleet" --agent "$NAME" --quiet \
+    && ok "verify-fleet: $NAME invariants pass" \
+    || say "⚠ verify-fleet flagged issues for $NAME — review above before trusting its memory"
   say "⚠ MANUAL: (1) secrets → $PROFILE/.env — Telegram token from @BotFather (or your secrets manager)  (2) credentials → $PROFILE/auth.json  (3) write $PROFILE/SOUL.md  (4) seed Honcho grounding for '$WORKSPACE'"
 else ok "scaffold complete (--no-start)."; fi
 

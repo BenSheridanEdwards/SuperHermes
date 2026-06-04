@@ -20,6 +20,10 @@
 import argparse, json, os, re, subprocess, sys, plistlib
 from pathlib import Path
 
+# gbrain binary version per agent, collected during the per-agent pass and
+# asserted for consistency in the cross-fleet section.
+GBRAIN_VERSIONS = {}
+
 C = {"P": "\033[32m", "W": "\033[33m", "F": "\033[31m", "H": "\033[36m", "D": "\033[2m", "x": "\033[0m"}
 if not sys.stdout.isatty():
     C = {k: "" for k in C}
@@ -93,6 +97,23 @@ def git(root, *args):
         return ""
 
 
+def _short(s, n=120):
+    s = " ".join(s.split())
+    return s if len(s) <= n else s[: n - 1] + "…"
+
+
+def _gbrain_serve_running(root):
+    """True if a `gbrain serve` process is live for this agent (it legitimately
+    holds the single-writer pglite lock, so its postmaster.pid is NOT stale)."""
+    try:
+        out = subprocess.run(["ps", "-axo", "command"], text=True,
+                             capture_output=True, timeout=10).stdout
+        return any("gbrain" in l and "serve" in l and str(root) in l
+                   for l in out.splitlines())
+    except Exception:
+        return False
+
+
 def check_agent(name, slug, root, rpt, config_versions):
     print(f"\n{C['H']}━━ {name} ({slug}) ━━{C['x']}")
     profile = root / ".hermes" / "profiles" / slug
@@ -116,10 +137,53 @@ def check_agent(name, slug, root, rpt, config_versions):
                 rpt.line("F", name, "GBrain store path", f"not profile-isolated: {db}")
             else:
                 rpt.line("P", name, "GBrain store profile-isolated")
+            # embedding endpoint must be the OpenAI-compatible /v1 base (fleet canon)
+            eb = (gc.get("embedding_base_url", "") or "").rstrip("/")
+            rpt.line("P" if eb.endswith("/v1") else "F", name,
+                     "GBrain embedding_base_url is /v1",
+                     "" if eb.endswith("/v1") else f"got {gc.get('embedding_base_url')!r}")
         except Exception as e:
             rpt.line("F", name, "GBrain config.json parse", str(e))
     else:
         rpt.line("W", name, "GBrain config.json", "not found")
+
+    # 2b. the definitive regression test: the brain actually OPENS and reads.
+    # A corrupted WAL (unclean shutdown) makes PGLite's WASM abort on open — the
+    # exact failure that took down DiVinci/Iris/Neo on 2026-06-04. Note: gbrain's
+    # CLI leaves a postmaster.pid behind after any access, so the pid file ALONE
+    # is not a corruption signal — only a pid file + a failed open is. We skip the
+    # open when a live serve holds the single-writer pglite (would false-fail).
+    pglite = profile / "home" / ".gbrain" / "brain.pglite"
+    pidf = pglite / "postmaster.pid"
+    serve_alive = _gbrain_serve_running(root)
+    if not (wrap.exists() and os.access(wrap, os.X_OK)):
+        pass  # wrapper failure already reported above
+    elif pidf.exists() and serve_alive:
+        rpt.line("P", name, "GBrain brain held open by live serve")
+    elif pglite.exists():
+        try:
+            out = subprocess.run([str(wrap), "list", "-n", "1"],
+                                 text=True, capture_output=True, timeout=25)
+            blob = out.stdout + out.stderr
+            if "WASM" in blob or "Aborted(" in blob:
+                rpt.line("F", name, "GBrain brain opens",
+                         "PGLite WASM abort — corrupted WAL; run gbrain-guardian to heal")
+            elif out.returncode != 0 and "No brain" not in blob:
+                rpt.line("W", name, "GBrain brain opens", _short(blob))
+            else:
+                rpt.line("P", name, "GBrain brain opens + reads")
+        except subprocess.TimeoutExpired:
+            rpt.line("W", name, "GBrain brain opens", "timeout opening store")
+
+    # 2d. record gbrain binary version for the cross-fleet drift check
+    if wrap.exists() and os.access(wrap, os.X_OK):
+        try:
+            v = subprocess.run([str(wrap), "--version"], text=True,
+                               capture_output=True, timeout=15)
+            mv = re.search(r"(\d+\.\d+\.\d+)", v.stdout)
+            GBRAIN_VERSIONS[name] = mv.group(1) if mv else "?"
+        except Exception:
+            GBRAIN_VERSIONS[name] = "ERR"
 
     # 3. no stale shared-wrapper references in scripts
     scripts = profile / "scripts"
@@ -253,6 +317,14 @@ def main():
     else:
         detail = ", ".join(f"{a}={v}" for a, v in sorted(config_versions.items()))
         rpt.line("F", "*", "config versions consistent across fleet", f"DRIFT: {detail}")
+
+    # cross-fleet: gbrain binary version consistency
+    gv = {v for v in GBRAIN_VERSIONS.values() if v not in ("?", "ERR")}
+    if len(gv) <= 1:
+        rpt.line("P", "*", f"gbrain binary versions consistent ({', '.join(gv) or 'n/a'})")
+    else:
+        detail = ", ".join(f"{a}={v}" for a, v in sorted(GBRAIN_VERSIONS.items()))
+        rpt.line("W", "*", "gbrain binary versions consistent across fleet", f"DRIFT: {detail}")
 
     print(f"\n{C['H']}Summary{C['x']}  "
           f"{C['P']}{rpt.passes} pass{C['x']}  {C['W']}{rpt.warns} warn{C['x']}  {C['F']}{rpt.fails} fail{C['x']}")
