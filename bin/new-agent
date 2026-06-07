@@ -289,48 +289,13 @@ if [ "$DRYRUN" = 1 ]; then
   plan "launchctl bootstrap gateway-$SLUG + honcho.$SLUG.backup; kickstart gateway"
   say "DRY-RUN complete → $TMP"
 elif [ "$START" = "yes" ]; then
-  { command -v docker >/dev/null && docker info >/dev/null 2>&1; } || die "Docker not running — start it or rerun --no-start"
-  [ -d "$HONCHO_DIR/honcho/.git" ] || { say "cloning Honcho…"; git clone --depth 1 https://github.com/plastic-labs/honcho.git "$HONCHO_DIR/.src"; cp -R "$HONCHO_DIR/.src/." "$HONCHO_DIR/honcho/"; rm -rf "$HONCHO_DIR/.src"; }
-  ( cd "$HONCHO_DIR/honcho" && docker compose -p "$PROJECT" up -d --build )
-  # Honcho's DB inits pgvector at 1536, but validates against EMBEDDING_VECTOR_DIMENSIONS
-  # (768 for nomic) and refuses to start until they match. The first api boot runs the
-  # migrations that create the table; retry the reshape until it lands, then restart.
-  say "reshaping pgvector embeddings → 768…"
-  for i in $(seq 1 15); do
-    ( cd "$HONCHO_DIR/honcho" && docker compose -p "$PROJECT" run --rm --entrypoint /app/.venv/bin/python api scripts/configure_embeddings.py --yes ) >/dev/null 2>&1 \
-      && { ok "pgvector reshaped to 768"; break; }
-    sleep 4
-  done
-  ( cd "$HONCHO_DIR/honcho" && docker compose -p "$PROJECT" up -d )
-  for i in $(seq 1 30); do curl -fsS "http://127.0.0.1:$API_PORT/health" >/dev/null 2>&1 && break; sleep 2; done
-  curl -fsS "http://127.0.0.1:$API_PORT/health" >/dev/null 2>&1 && ok "honcho api healthy ($API_PORT)" || say "⚠ api not healthy — check: docker compose -p $PROJECT logs"
-  # GBrain: install the real v0.41 runtime (profile-isolated) + seed from vault/brain
-  # BEFORE the gateway starts (its MCP would lock the pglite store).
-  #
-  # Pin the ref — the framework requires v0.41.x, but upstream HEAD has moved to
-  # 0.42.x. An unpinned `bun add` would silently install the wrong minor and
-  # break the invariant (and reintroduce fleet drift). 248fb7a = 0.41.38.0, the
-  # newest 0.41.x. Bump this ref deliberately, fleet-wide, never per-agent.
-  GBRAIN_REF="github:garrytan/gbrain#248fb7a90f9ce5fe2e5d01fe486345d08834ed40"  # 0.41.38.0
-  if command -v bun >/dev/null; then
-    say "installing GBrain 0.41.38 (profile-isolated, pinned)…"
-    ( export HOME="$PROFILE/home" BUN_INSTALL="$PROFILE/home/.bun" XDG_CACHE_HOME="$PROFILE/home/.cache" PATH="/opt/homebrew/bin:$PROFILE/home/.bun/bin:$PATH"
-      mkdir -p "$BUN_INSTALL/bin"
-      bun add -g "$GBRAIN_REF" >/dev/null 2>&1 || say "⚠ gbrain install failed — run: bun add -g $GBRAIN_REF" )
-    "$AGENT_ROOT/.local/bin/gbrain" import "$AGENT_ROOT/vault/brain" >/dev/null 2>&1 || true
-    "$AGENT_ROOT/.local/bin/gbrain" embed --stale >/dev/null 2>&1 || true
-    "$AGENT_ROOT/.local/bin/gbrain" stats 2>/dev/null | grep -iE "^Pages|^Embedded" | sed 's/^/  gbrain /' || true
-    ok "GBrain runtime installed + vault seeded"
-  else say "⚠ bun not found — install GBrain manually: bun add -g $GBRAIN_REF"; fi
-  launchctl bootstrap "gui/$(id -u)" "$LA/ai.hermes.gateway-$SLUG.plist" 2>/dev/null || true
-  launchctl bootstrap "gui/$(id -u)" "$LA/ai.hermes.honcho.$SLUG.backup.plist" 2>/dev/null || true
-  launchctl kickstart -k "gui/$(id -u)/ai.hermes.gateway-$SLUG" 2>/dev/null || true
-  ok "launchd registered + gateway kickstarted"
-  # post-create gate: assert this agent's invariants — esp. that GBrain is wired
-  # to its own store AND the brain actually opens — before we call it ready.
-  python3 "$REPO/bin/verify-fleet" --agent "$NAME" --quiet \
-    && ok "verify-fleet: $NAME invariants pass" \
-    || say "⚠ verify-fleet flagged issues for $NAME — review above before trusting its memory"
+  # Shared boot sequence — one copy in lib/boot-services.sh (also used by
+  # Shared/Fleet/bin/boot-agent), so a fix to the boot path lands for both. It also
+  # carries the .env-perms + fleet-BWS-token fixes that a fresh gateway needs for a
+  # green day-one vault pull. Required env (NAME/SLUG/AGENT_ROOT/PROFILE/HONCHO_DIR/
+  # PROJECT/API_PORT/LA/AGENTS_ROOT/REPO) is set above.
+  . "$REPO/lib/boot-services.sh" || die "could not source $REPO/lib/boot-services.sh"
+  boot_agent_services || die "services boot failed (Docker/disk/Honcho preflight — see above)"
   say "⚠ MANUAL: (1) secrets → $PROFILE/.env — Telegram token from @BotFather (or your secrets manager)  (2) credentials → $PROFILE/auth.json  (3) write $PROFILE/SOUL.md  (4) seed Honcho grounding for '$WORKSPACE'"
 else ok "scaffold complete (--no-start)."; fi
 
