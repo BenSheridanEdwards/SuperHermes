@@ -79,6 +79,36 @@ AGENTS_ROOT=""; [ -f "$REPO/superhermes.conf" ] && . "$REPO/superhermes.conf" ||
 [ -d "${AGENTS_ROOT:-/nonexistent}/TestUnit" ] && bad "dry-run left a real agent dir!" || ok "dry-run leaves no real agent dir"
 
 # ---------------------------------------------------------------------------
+section "set-model-block — read round-trips; write replaces ONLY the model section"
+T="$(mktemp -d)"
+printf 'model:\n  provider: openai-codex\n  default: gpt-5.5\n\ntoolsets:\n- hermes-cli\n\nagent:\n  max_turns: 150\n' > "$T/c.yaml"
+printf 'model:\n  provider: xai-oauth\n  default: grok-4.3\nfallback_providers:\n- provider: opencode-go\n  model: kimi-k2-6\n- provider: anthropic\n  model: claude\ncredential_pool_strategies:\n  xai-oauth: round_robin\n' \
+  | python3 "$REPO/bin/set-model-block" write "$T/c.yaml"
+w="$(cat "$T/c.yaml")"
+assert_has   "$w" "provider: xai-oauth"         "write sets the new primary"
+assert_has   "$w" "provider: opencode-go"       "write sets the fallback chain"
+assert_has   "$w" "credential_pool_strategies:" "write sets round-robin"
+assert_hasnt "$w" "openai-codex"                "write drops the old model"
+assert_has   "$w" "max_turns: 150"              "write preserves non-model keys"
+assert_has   "$w" "- hermes-cli"                "write preserves toolsets"
+assert_eq "$(python3 "$REPO/bin/set-model-block" read "$T/c.yaml")" \
+  "xai-oauth|grok-4.3|opencode-go|kimi-k2-6|anthropic|claude|Y" "read round-trips the model"
+rm -rf "$T"
+
+# ---------------------------------------------------------------------------
+section "new-agent — model flags render the chosen primary + fallbacks + round-robin"
+out="$(bash "$REPO/bin/new-agent" --name TestModel --camp test --tier m --dry-run \
+  --provider anthropic --model claude-x --fallback xai-oauth:grok-4.3 --fallback opencode-go:kimi-k2-6 --round-robin 2>&1)"; rc=$?
+assert_eq "$rc" "0" "model dry-run exits 0"
+td="$(printf '%s' "$out" | python3 -c "import sys,re;t=re.sub(r'\x1b\[[0-9;]*m','',sys.stdin.read());m=re.search(r'dry-run . (\S+)',t);print(m.group(1) if m else '')")"
+mc="$(cat "$td/TestModel/.hermes/profiles/testmodel/config.yaml" 2>/dev/null)"
+assert_has "$mc" "provider: anthropic"   "primary provider from --provider"
+assert_has "$mc" "default: claude-x"     "primary model from --model"
+assert_has "$mc" "provider: xai-oauth"   "fallback #1 from --fallback"
+assert_has "$mc" "provider: opencode-go" "fallback #2 from --fallback"
+assert_has "$mc" "round_robin"           "round-robin from --round-robin"
+
+# ---------------------------------------------------------------------------
 section "memory-health-snapshot.py.tmpl — parses + uses the OWN gbrain wrapper"
 T="$(mktemp -d)"
 A_NAME=Probe A_SLUG=probe A_ROOT="$T/Probe" render "$REPO/templates/memory-health-snapshot.py.tmpl" > "$T/snap.py"

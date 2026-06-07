@@ -200,10 +200,19 @@ An agent is "ideal" only if **all** of these hold:
 ## Build it
 
 ```sh
-bin/new-agent --name Sky --camp personal --tier m   # interactive: name · camp · tier
+bin/new-agent --name Sky --camp personal --tier m   # interactive: name · camp · tier · model
 bin/new-agent --name Sky --dry-run                  # render to a temp dir, zero side effects
 bin/new-agent --name Sky --no-start                 # scaffold files only
+bin/new-agent --name Sky --provider xai-oauth --model grok-4.3 \
+              --fallback opencode-go:kimi-k2-6 --fallback openai-codex:gpt-5.5 --round-robin
 ```
+
+`new-agent` asks for the **primary provider + model**, up to **two fallbacks** (the
+gateway's `fallback_providers` failover chain), and whether to **round-robin** each
+provider's API keys (`credential_pool_strategies`) — defaults shown in `[brackets]`,
+never hidden. Cloning a reference agent (`REF_AGENT`) defaults them to that agent's
+model. The model stays **operator-choice and fleet-agnostic**: fleet defaults (e.g.
+a house provider) are layered on top by the fleet, not baked in here.
 
 The phases: directory skeleton → town-square sandbox (compile-checked) → Hermes
 profile (`config.yaml`, `honcho.json`, **SOUL seed**, MEMORY/USER, **`.env` secret

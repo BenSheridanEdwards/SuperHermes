@@ -16,6 +16,8 @@
 #   new-agent --name Sky --no-start            # scaffold only
 #   new-agent --name Sky --dry-run             # render to temp, no side effects
 #   new-agent --name Sky --yes --no-start      # non-interactive scaffold
+#   new-agent --name Sky --provider xai-oauth --model grok-4.3 \
+#             --fallback opencode-go:kimi-k2-6 --fallback openai-codex:gpt-5.5 --round-robin
 #
 # Pauses for the two things it can't autogenerate: credentials (auth.json) and
 # the agent's SOUL/persona. (macOS / launchd / sandbox-exec required to start.)
@@ -46,15 +48,19 @@ PY
 }
 
 NAME="" CAMP="" TIER="" START="yes" DRYRUN=0 YES=0
+MODEL_PROVIDER="" MODEL_NAME="" FB1_PROVIDER="" FB1_MODEL="" FB2_PROVIDER="" FB2_MODEL="" ROUNDROBIN=""
 while [ $# -gt 0 ]; do case "$1" in
   --name) NAME="${2:-}"; shift 2;; --camp) CAMP="${2:-}"; shift 2;; --tier) TIER="${2:-}"; shift 2;;
+  --provider) MODEL_PROVIDER="${2:-}"; shift 2;; --model) MODEL_NAME="${2:-}"; shift 2;;
+  --fallback) if [ -z "$FB1_PROVIDER" ]; then FB1_PROVIDER="${2%%:*}"; FB1_MODEL="${2#*:}"; else FB2_PROVIDER="${2%%:*}"; FB2_MODEL="${2#*:}"; fi; shift 2;;
+  --round-robin) ROUNDROBIN="y"; shift;;
   --no-start) START="no"; shift;; --start) START="yes"; shift;; --dry-run) DRYRUN=1; shift;;
   --yes|-y) YES=1; shift;;
-  -h|--help) sed -n '2,20p' "$0"; exit 0;; *) die "unknown arg: $1";;
+  -h|--help) sed -n '2,22p' "$0"; exit 0;; *) die "unknown arg: $1";;
 esac; done
 
 ask(){ local __v="$1" __p="$2" __d="${3:-}" __r; [ -n "${!__v}" ] && return 0
-  if [ "$DRYRUN" = 1 ]; then printf -v "$__v" '%s' "$__d"; return 0; fi
+  if [ "$DRYRUN" = 1 ] || [ "$YES" = 1 ]; then printf -v "$__v" '%s' "$__d"; return 0; fi
   read -r -p "$__p${__d:+ [$__d]}: " __r || true; printf -v "$__v" '%s' "${__r:-$__d}"; }
 
 # ---- collect ----------------------------------------------------------------
@@ -66,6 +72,55 @@ ask CAMP "Camp / workspace suffix (e.g. personal)" "personal"
 ask TIER "Dialectic tier (s|m|l)" "m"
 [[ "$TIER" =~ ^[smlSML]$ ]] || die "tier must be s, m, or l"
 TIER="$(printf '%s' "$TIER" | tr '[:upper:]' '[:lower:]')"
+
+# Primary model + up to two fallbacks (+ optional round-robin key rotation),
+# asked on EVERY path. Defaults show in [brackets] (never hidden) — and when
+# cloning a reference agent they default to THAT agent's model, so accepting
+# them clones it verbatim and changing one overrides it. Fleet defaults like
+# MiMo are layered on top by the fleet, NOT here — SuperHermes is model-agnostic.
+DEF_MP="openai-codex"; DEF_MM="gpt-5.5"; DEF_F1P=""; DEF_F1M=""; DEF_F2P=""; DEF_F2M=""; DEF_RR="N"
+if [ -n "$REF_AGENT" ] && [ -d "$AGENTS_ROOT/$REF_AGENT" ]; then
+  _rs="$(printf '%s' "$REF_AGENT" | tr '[:upper:]' '[:lower:]')"
+  _refmodel="$(python3 "$REPO/bin/set-model-block" read "$AGENTS_ROOT/$REF_AGENT/.hermes/profiles/$_rs/config.yaml" 2>/dev/null || true)"
+  if [ -n "$_refmodel" ]; then
+    IFS='|' read -r DEF_MP DEF_MM DEF_F1P DEF_F1M DEF_F2P DEF_F2M DEF_RR <<<"$_refmodel"
+    [ -n "$DEF_MP" ] || DEF_MP="openai-codex"; [ -n "$DEF_MM" ] || DEF_MM="gpt-5.5"; [ -n "$DEF_RR" ] || DEF_RR="N"
+  fi
+fi
+ask MODEL_PROVIDER "Primary provider" "$DEF_MP"
+ask MODEL_NAME     "Primary model" "$DEF_MM"
+ask FB1_PROVIDER   "Fallback #1 provider (blank = none)" "$DEF_F1P"
+if [ -n "$FB1_PROVIDER" ]; then ask FB1_MODEL "Fallback #1 model" "$DEF_F1M"; fi
+ask FB2_PROVIDER   "Fallback #2 provider (blank = none)" "$DEF_F2P"
+if [ -n "$FB2_PROVIDER" ]; then ask FB2_MODEL "Fallback #2 model" "$DEF_F2M"; fi
+ask ROUNDROBIN     "Round-robin API-key rotation for the provider(s)? (y/N)" "$DEF_RR"
+
+# Build the model YAML block from the answers. `fallback_providers` is the
+# gateway's sequential failover chain; `credential_pool_strategies.<provider>:
+# round_robin` cycles a provider's API keys evenly instead of fill-first.
+MODEL_BLOCK="model:
+  provider: ${MODEL_PROVIDER:-openai-codex}
+  default: ${MODEL_NAME:-gpt-5.5}"
+if { [ -n "$FB1_PROVIDER" ] && [ -n "$FB1_MODEL" ]; } || { [ -n "$FB2_PROVIDER" ] && [ -n "$FB2_MODEL" ]; }; then
+  MODEL_BLOCK+="
+fallback_providers:"
+  if [ -n "$FB1_PROVIDER" ] && [ -n "$FB1_MODEL" ]; then MODEL_BLOCK+="
+- provider: $FB1_PROVIDER
+  model: $FB1_MODEL"; fi
+  if [ -n "$FB2_PROVIDER" ] && [ -n "$FB2_MODEL" ]; then MODEL_BLOCK+="
+- provider: $FB2_PROVIDER
+  model: $FB2_MODEL"; fi
+fi
+if [[ "$ROUNDROBIN" =~ ^[Yy] ]]; then
+  MODEL_BLOCK+="
+credential_pool_strategies:
+  ${MODEL_PROVIDER:-openai-codex}: round_robin"
+  if [ -n "$FB1_PROVIDER" ]; then MODEL_BLOCK+="
+  $FB1_PROVIDER: round_robin"; fi
+  if [ -n "$FB2_PROVIDER" ]; then MODEL_BLOCK+="
+  $FB2_PROVIDER: round_robin"; fi
+fi
+export MODEL_BLOCK
 
 export AGENT_NAME="$NAME"
 export AGENT_SLUG="$(printf '%s' "$NAME" | tr '[:upper:]' '[:lower:]')"
@@ -159,6 +214,11 @@ else
   render "$REPO/templates/config.yaml.tmpl" > "$PROFILE/config.yaml"
   ok "config.yaml (bundled generic template)"
 fi
+# Install the operator's chosen model over whatever the template/clone produced:
+# replaces the model / providers / fallback_providers / credential_pool_strategies
+# blocks, preserving every other key. SuperHermes-owned helper (no Fleet dep).
+printf '%s\n' "$MODEL_BLOCK" | python3 "$REPO/bin/set-model-block" write "$PROFILE/config.yaml" || die "could not set model block"
+ok "model → ${MODEL_PROVIDER:-openai-codex}/${MODEL_NAME:-gpt-5.5}"
 cat > "$PROFILE/honcho.json" <<JSON
 { "baseUrl": "http://127.0.0.1:$API_PORT", "enabled": true,
   "hosts": { "hermes.$SLUG": { "enabled": true, "workspace": "$WORKSPACE",

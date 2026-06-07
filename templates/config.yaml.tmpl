@@ -3,7 +3,7 @@
 # Hermes fills sensible defaults for any key you omit.
 
 model:
-  provider: openai-codex      # change to your provider
+  provider: openai-codex      # default shown by new-agent; pass --provider / answer the prompt to change
   default: gpt-5.5
 
 toolsets:
@@ -35,6 +35,21 @@ approvals:
 
 code_execution:
   mode: project
+
+# Credentials are pulled automatically from Bitwarden Secrets Manager at startup
+# (the shared agentfleet-reader token lives in /Users/agents/Agents/.fleet.env,
+# loaded by hermes-gateway-launch). This block makes a NEW agent auto-pull the
+# whole vault on day one — without it the agent starts with no creds. The fleet
+# `credentials` health probe flags any agent missing this.
+secrets:
+  bitwarden:
+    enabled: true
+    access_token_env: BWS_ACCESS_TOKEN
+    project_id: 5f892349-8f4b-42f6-81cb-b45a0109a796
+    cache_ttl_seconds: 300
+    override_existing: true
+    auto_install: true
+    server_url: https://vault.bitwarden.eu
 
 # Semantic/wiki brain (GBrain v0.41, profile-isolated). Each agent runs its OWN
 # runtime via its OWN wrapper — no shared/cross-agent dependency.
