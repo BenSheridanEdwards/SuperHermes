@@ -1,0 +1,96 @@
+#!/usr/bin/env python3
+"""Read or replace the model section of a Hermes config.yaml — SuperHermes-owned,
+no Fleet dependency, no PyYAML (system python3 may lack it). Line-based so every
+other key, comment, and bit of formatting is preserved.
+
+The "model section" = the top-level blocks `model`, `providers`,
+`fallback_providers`, and `credential_pool_strategies`.
+
+  set-model-block read  <config.yaml>
+      Print `provider|default|fb1p|fb1m|fb2p|fb2m|rr` (rr = Y if any
+      credential_pool_strategies value is round_robin, else N). Used by new-agent
+      to seed its model prompts from a cloned reference agent.
+
+  set-model-block write <config.yaml>     (new block on stdin)
+      Replace the model section with the block read from stdin, in place.
+"""
+import sys
+
+MODEL_KEYS = {"model", "providers", "fallback_providers", "credential_pool_strategies"}
+
+
+def _spans(lines):
+    """Yield (key_or_None, start, end) for each top-level block. A line is a new
+    top-level key when it starts at column 0 and is neither a list item (`- `) nor
+    a comment. The first span (key None) is any leading comment/blank preamble."""
+    spans, cur_key, start = [], None, 0
+    for i, line in enumerate(lines):
+        is_key = bool(line) and not line[0].isspace() and not line.startswith("-") and not line.lstrip().startswith("#")
+        if is_key:
+            spans.append((cur_key, start, i))
+            cur_key, start = line.split(":", 1)[0].strip(), i
+    spans.append((cur_key, start, len(lines)))
+    return spans
+
+
+def read(cfg):
+    lines = open(cfg).read().splitlines()
+    prov = mod = f1p = f1m = f2p = f2m = ""
+    rr = "N"
+    for key, s, e in _spans(lines):
+        body = lines[s:e]
+        if key == "model":
+            for b in body:
+                t = b.strip()
+                if t.startswith("provider:"):
+                    prov = t.split(":", 1)[1].strip()
+                elif t.startswith("default:"):
+                    mod = t.split(":", 1)[1].strip()
+        elif key == "fallback_providers":
+            items, cur = [], None
+            for b in body[1:]:
+                t = b.strip()
+                if t.startswith("- provider:"):
+                    cur = [t.split(":", 1)[1].strip(), ""]
+                    items.append(cur)
+                elif t.startswith("provider:"):
+                    cur = [t.split(":", 1)[1].strip(), ""]
+                    items.append(cur)
+                elif t.startswith("model:") and cur is not None:
+                    cur[1] = t.split(":", 1)[1].strip()
+            if len(items) > 0:
+                f1p, f1m = items[0]
+            if len(items) > 1:
+                f2p, f2m = items[1]
+        elif key == "credential_pool_strategies":
+            if any("round_robin" in b for b in body):
+                rr = "Y"
+    print("|".join([prov, mod, f1p, f1m, f2p, f2m, rr]))
+
+
+def write(cfg):
+    block = sys.stdin.read().rstrip("\n").splitlines()
+    lines = open(cfg).read().splitlines()
+    out, insert_at = [], None
+    for key, s, e in _spans(lines):
+        if key in MODEL_KEYS:
+            if insert_at is None:
+                insert_at = len(out)  # the new block goes where the model section was
+            continue  # drop the old model-section block
+        out.extend(lines[s:e])
+    if insert_at is None:  # no model section found — insert after leading comments
+        insert_at = 0
+        while insert_at < len(out) and (not out[insert_at].strip() or out[insert_at].lstrip().startswith("#")):
+            insert_at += 1
+    result = out[:insert_at] + block + out[insert_at:]
+    open(cfg, "w").write("\n".join(result) + "\n")
+
+
+def main():
+    if len(sys.argv) != 3 or sys.argv[1] not in ("read", "write"):
+        sys.exit(__doc__)
+    (read if sys.argv[1] == "read" else write)(sys.argv[2])
+
+
+if __name__ == "__main__":
+    main()
