@@ -282,14 +282,16 @@ def check_agent(name, slug, root, rpt, config_versions):
     if plist.exists():
         try:
             ka = plistlib.loads(plist.read_bytes()).get("KeepAlive")
-            # Accept either the literal `true` or a launchd restart-policy dict.
-            # The fleet standardised on {SuccessfulExit: false} — restart on
-            # crash, but honour a clean drain/shutdown so an intentional restart
-            # isn't fought. Both keep the gateway up; only an absent/empty
-            # KeepAlive is a real miss.
-            ok = ka is True or (isinstance(ka, dict) and len(ka) > 0)
-            rpt.line("P" if ok else "W", name, "gateway plist KeepAlive (restart-on-crash)",
-                     "" if ok else f"is {ka!r} (expected true or a restart-policy dict)")
+            # Fleet standard: KeepAlive must be literal `true` (always restart).
+            # A restart-policy dict like {SuccessfulExit: false} only respawns on a
+            # *failed* exit, so a graceful/clean shutdown (e.g. an internal
+            # restart_requested drain) strands the gateway: launchd honours the
+            # clean exit, and gateway_healer defers process liveness to launchd.
+            # That double-gap took CW Jeeves down ~11h on 2026-06-06. Require true
+            # so clean exits also respawn; a dict or absent KeepAlive is a miss.
+            ok = ka is True
+            rpt.line("P" if ok else "W", name, "gateway plist KeepAlive (always-restart)",
+                     "" if ok else f"is {ka!r} (expected true so clean exits also respawn)")
         except Exception as e:
             rpt.line("W", name, "gateway plist parse", str(e))
 
