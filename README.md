@@ -108,10 +108,13 @@ already enforces the real rule.
 
 ### 3. Runtime — the gateway under launchd
 A `launchd` job runs `sandbox-exec -f <agent>.sb … hermes_cli … gateway run`, with
-`KeepAlive` set to restart the gateway on crash — either `true` or, as the fleet
-standardised, `{SuccessfulExit: false}` (restart unless it exited cleanly, so an
-intentional drain/restart isn't fought). Reload with `launchctl kickstart -k`
-(config change) or `bootout`+`bootstrap` (plist change).
+`KeepAlive` set to **`true`** — launchd *always* respawns the gateway. An agent
+stays down only when it is **explicitly** shut down (`launchctl bootout`); a clean
+process exit alone is respawned, so an internal restart-drain recovers itself. Do
+**not** use the `{SuccessfulExit: false}` restart-policy dict — it honours any clean
+exit, so a gateway that exits cleanly intending to restart gets stranded (an outage
+mode the fleet hit). Reload with `launchctl kickstart -k` (config change) or
+`bootout`+`bootstrap` (plist change).
 
 ### 4. Memory — two durable layers, each verified separately
 - **Bootstrap** — small, always-loaded `MEMORY.md` + `USER.md`. High-signal, tiny.
