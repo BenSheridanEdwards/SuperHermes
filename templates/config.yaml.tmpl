@@ -59,3 +59,18 @@ mcp_servers:
     args:
       - serve
     enabled: true
+
+# Token-economics telemetry: log-only observer hooks (pre/post API request) that
+# attribute per-call tokens + real usage to $HERMES_HOME/logs/token_monitor.jsonl.
+# Generic, fail-open, latency-budgeted — useful for any agent; the fleet's
+# token_economics collector reads these into the HUD's TOKEN ECON tab. Plugins are
+# opt-in, so this is the agent's allowlist (add more as needed).
+plugins:
+  enabled:
+  - token_monitor
+  disabled: []
+
+token_monitor:
+  enabled: true
+  sample_rate: 1.0
+  headroom_sample_rate: 0.25
