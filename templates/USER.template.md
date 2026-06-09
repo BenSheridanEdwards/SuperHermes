@@ -1,7 +1,14 @@
 # USER
 
-Use this for compact, always-loaded user facts and preferences.
+> Always-loaded operator profile — keep it small and FIXED. Durable preferences
+> and learnings belong in GBrain (retrieved on demand), not here. Don't grow this
+> file; every line costs tokens on every turn.
 
-Include name and preferred form of address, role and scope, communication style, hard approval rules, stable preferences, and delivery/channel preferences.
+## Who I am
+<!-- Name · what to call me · how I communicate · what I'm into · useful links -->
 
-Avoid speculation, inferred birthdays/ages unless explicitly provided, stale client/project status, temporary requests, and anything that belongs in a project page or skill.
+## Mission
+<!-- What this agent should be working toward -->
+
+## Hard rules
+<!-- Never without my explicit yes: … -->
