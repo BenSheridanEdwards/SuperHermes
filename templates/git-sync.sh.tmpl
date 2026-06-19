@@ -37,6 +37,15 @@ SCRATCH="${TMPDIR:-/tmp}/${SLUG}-gitsync-secrets.txt"
 cd "$ROOT" 2>/dev/null || { echo "git-sync: no directory at $ROOT"; exit 1; }
 [ -d .git ] || { echo "git-sync: $ROOT is not a git repo"; exit 1; }
 
+# Clear an index.lock orphaned by a crashed git op — but only when nothing holds
+# it AND it hasn't been touched in 5min, so we never race a live git. Without
+# this, one crashed op turns every daily run into a CRIT until cleared by hand.
+# Silent per the output contract: self-healing isn't something a human must act on.
+lock=".git/index.lock"
+if [ -f "$lock" ] && ! lsof "$lock" >/dev/null 2>&1 && [ -z "$(find "$lock" -mmin -5)" ]; then
+  rm -f "$lock"
+fi
+
 push_if_approved() {
   git remote get-url origin >/dev/null 2>&1 || return 0
   if [ "${AGENT_GIT_SYNC_PUSH_APPROVED:-0}" != "1" ]; then
