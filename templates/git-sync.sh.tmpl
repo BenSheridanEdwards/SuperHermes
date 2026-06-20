@@ -37,12 +37,15 @@ SCRATCH="${TMPDIR:-/tmp}/${SLUG}-gitsync-secrets.txt"
 cd "$ROOT" 2>/dev/null || { echo "git-sync: no directory at $ROOT"; exit 1; }
 [ -d .git ] || { echo "git-sync: $ROOT is not a git repo"; exit 1; }
 
-# Clear an index.lock orphaned by a crashed git op — but only when nothing holds
-# it AND it hasn't been touched in 5min, so we never race a live git. Without
-# this, one crashed op turns every daily run into a CRIT until cleared by hand.
-# Silent per the output contract: self-healing isn't something a human must act on.
+# Clear an index.lock orphaned by a git op killed mid-write (a reboot, crash, or
+# OOM-kill). Liveness — does a process still hold it open? — is the ONLY safe
+# signal; age is not. A lock orphaned seconds before this run has a fresh mtime
+# yet no owner, so gating on mtime (the old `-mmin -5`) skips exactly that case
+# and turns every daily run into a CRIT until cleared by hand — what bit Doc and
+# Probe on 2026-06-20. lsof showing no holder means it's an orphan; git itself
+# tells you to remove it. Silent per the output contract — no human action needed.
 lock=".git/index.lock"
-if [ -f "$lock" ] && ! lsof "$lock" >/dev/null 2>&1 && [ -z "$(find "$lock" -mmin -5)" ]; then
+if [ -f "$lock" ] && ! lsof "$lock" >/dev/null 2>&1; then
   rm -f "$lock"
 fi
 
