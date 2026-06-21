@@ -27,8 +27,39 @@ say(){ printf '\033[36m%s\033[0m\n' "$*"; }
 ok(){  printf '  \033[32m✓\033[0m %s\n' "$*"; }
 warn(){ printf '  \033[33m⚠\033[0m %s\n' "$*"; }
 
+# Re-render the normalised cron scripts from their templates, byte-for-byte the
+# way bin/new-agent does (__AGENT_NAME__/__AGENT_SLUG__/__AGENT_ROOT__). ONLY the
+# scripts meant to be identical across agents — never per-agent config. Guarded on
+# template existence + atomic temp→mv so a partial checkout or a render failure
+# can't wipe a working script. Uses NAME/SLUG/AGENT_ROOT/PROFILE/REPO from scope.
+render_normalised_scripts() {
+  local pair tmpl dst
+  mkdir -p "$PROFILE/scripts" 2>/dev/null || true
+  for pair in "git-sync.sh.tmpl:git-sync.sh" \
+              "memory-health-snapshot.py.tmpl:memory_health_snapshot.py"; do
+    tmpl="$REPO/templates/${pair%%:*}"; dst="$PROFILE/scripts/${pair##*:}"
+    [ -f "$tmpl" ] || continue   # partial checkout: never wipe a working script
+    if AGENT_NAME="$NAME" AGENT_SLUG="$SLUG" AGENT_ROOT="$AGENT_ROOT" python3 -c \
+         'import os,re,sys;sys.stdout.write(re.sub(r"__([A-Z_]+)__",lambda m:os.environ.get(m.group(1),m.group(0)),open(sys.argv[1]).read()))' \
+         "$tmpl" > "$dst.tmp" 2>/dev/null; then
+      mv "$dst.tmp" "$dst" && chmod +x "$dst"
+    else
+      rm -f "$dst.tmp"
+    fi
+  done
+}
+
 boot_agent_services() {
   local compose_dir="$HONCHO_DIR/honcho" i
+
+  # Self-heal script drift FIRST, before any preflight that could bail: re-render
+  # the normalised scripts so a fix to a shared template reaches already-provisioned
+  # agents on restart, not just fresh `new-agent` runs. A git-sync self-heal added
+  # 2026-06-19 never reached Doc/Probe — their daily crons CRIT'd on a stale
+  # index.lock until the scripts were re-rendered by hand (incident 2026-06-20).
+  say "services: re-render normalised scripts"
+  render_normalised_scripts
+  ok "normalised scripts in sync with templates (git-sync.sh, memory_health_snapshot.py)"
 
   say "services: preflight"
   { command -v docker >/dev/null && docker info >/dev/null 2>&1; } || { warn "Docker not running — cannot boot services"; return 1; }
