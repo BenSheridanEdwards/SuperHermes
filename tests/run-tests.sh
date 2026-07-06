@@ -53,6 +53,23 @@ if grep -qE 'push .*(--force|-f)\b' sync.sh; then bad "rendered script never for
 mkdir repo; cd repo; git init -q; echo a > f; git add -A; git -c user.name=t -c user.email=t@t commit -qm init
 run(){ AGENT_GIT_ROOT="$T/repo" bash "$T/sync.sh" 2>&1; }
 out="$(run)"; rc=$?; assert_eq "$rc" "0" "noop exits 0"; assert_eq "$out" "" "noop is silent"
+# An orphaned lock (no live holder) self-heals regardless of age — old...
+: > .git/index.lock; touch -t 200001010000 .git/index.lock
+out="$(run)"; rc=$?; assert_eq "$rc" "0" "old orphaned index.lock self-heals"; assert_eq "$out" "" "lock heal is silent"
+[ -e .git/index.lock ] && bad "old orphaned index.lock is removed" || ok "old orphaned index.lock is removed"
+# ...AND fresh: a lock orphaned by a reboot seconds ago has a fresh mtime but no
+# owner. This is the Doc/Probe 2026-06-20 regression — it MUST heal, not block.
+: > .git/index.lock
+out="$(run)"; rc=$?; assert_eq "$rc" "0" "fresh orphaned index.lock self-heals (reboot regression)"
+[ -e .git/index.lock ] && bad "fresh orphaned index.lock is removed" || ok "fresh orphaned index.lock is removed"
+# A lock a LIVE process holds open must NOT be touched — don't race a running git.
+: > .git/index.lock
+exec 9<>.git/index.lock                      # this shell now holds the lock open
+out="$(run)"; rc=$?
+exec 9>&-                                     # release
+[ "$rc" != "0" ] && ok "live-held index.lock is not removed" || bad "live-held index.lock should stop git"
+[ -e .git/index.lock ] && ok "live-held index.lock remains for the owner" || bad "live-held index.lock remains for the owner"
+rm -f .git/index.lock
 echo b >> f; n0=$(git rev-list --count HEAD); out="$(run)"; rc=$?; n1=$(git rev-list --count HEAD)
 assert_eq "$rc" "0" "change exits 0"; assert_eq "$out" "" "successful commit is silent"
 assert_eq "$n1" "$((n0+1))" "change creates exactly one commit"
@@ -73,6 +90,11 @@ assert_has "$out" "root .gitignore"          "renders normalised root .gitignore
 assert_has "$out" "git initialised at root"  "initialises git at root"
 assert_has "$out" "memory-maintenance"        "renders memory-maintenance cron"
 assert_has "$out" "DRY-RUN complete"         "completes cleanly"
+td="$(printf '%s' "$out" | python3 -c "import sys,re;t=re.sub(r'\x1b\[[0-9;]*m','',sys.stdin.read());m=re.search(r'dry-run . (\S+)',t);print(m.group(1) if m else '')")"
+pl="$(cat "$td/LaunchAgents/ai.hermes.gateway-testunit.plist" 2>/dev/null)"
+assert_has "$pl" "Shared/bin/hermes-gateway-launch" "gateway plist uses shared launcher"
+assert_hasnt "$pl" "hermes_cli.main"                "gateway plist does not bypass shared launcher"
+assert_has "$pl" "<string>testunit</string>"        "gateway plist passes slug to launcher"
 python3 -m json.tool "$REPO/templates/agent-template.json" >/dev/null 2>&1 \
   && ok "agent template manifest parses" || bad "agent template manifest parses"
 AGENTS_ROOT=""; [ -f "$REPO/superhermes.conf" ] && . "$REPO/superhermes.conf" || . "$REPO/superhermes.conf.example"
