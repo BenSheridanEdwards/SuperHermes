@@ -140,5 +140,28 @@ assert_has "$chk" "SYNC_OK"   "git-sync = standalone no_agent job"
 rm -rf "$T"
 
 # ---------------------------------------------------------------------------
+section "boot-services — a restart re-renders stale normalised scripts (drift self-heal)"
+T="$(mktemp -d)"; PR="$T/Probe"; PROF="$PR/.hermes/profiles/probe"
+mkdir -p "$PROF/scripts"
+# A restart inherits whatever stale rendered copies the agent already has on disk.
+echo "STALE git-sync" > "$PROF/scripts/git-sync.sh"
+echo "STALE snapshot" > "$PROF/scripts/memory_health_snapshot.py"
+# Run the boot's first step. Subshell: boot-services.sh redefines say/ok/warn, so
+# keep its sourcing out of this harness's ok() PASS counter.
+( source "$REPO/lib/boot-services.sh"
+  NAME=Probe SLUG=probe AGENT_ROOT="$PR" PROFILE="$PROF" render_normalised_scripts ) >/dev/null 2>&1
+want_gs="$(A_NAME=Probe A_SLUG=probe A_ROOT="$PR" render "$REPO/templates/git-sync.sh.tmpl")"
+want_ms="$(A_NAME=Probe A_SLUG=probe A_ROOT="$PR" render "$REPO/templates/memory-health-snapshot.py.tmpl")"
+assert_eq "$(cat "$PROF/scripts/git-sync.sh")"               "$want_gs" "boot re-renders stale git-sync.sh to match template"
+assert_eq "$(cat "$PROF/scripts/memory_health_snapshot.py")" "$want_ms" "boot re-renders stale snapshot to match template"
+[ -x "$PROF/scripts/git-sync.sh" ] && ok "re-rendered git-sync.sh stays executable" || bad "re-rendered git-sync.sh stays executable"
+# Guard: a missing template (partial checkout) must NOT wipe the working script.
+echo "KEEP" > "$PROF/scripts/git-sync.sh"
+( source "$REPO/lib/boot-services.sh"
+  NAME=Probe SLUG=probe AGENT_ROOT="$PR" PROFILE="$PROF" REPO="$T/no-templates" render_normalised_scripts ) >/dev/null 2>&1
+assert_eq "$(cat "$PROF/scripts/git-sync.sh")" "KEEP" "missing template leaves the existing script untouched"
+cd "$REPO"; rm -rf "$T"
+
+# ---------------------------------------------------------------------------
 printf '\n\033[36mSummary\033[0m  \033[32m%d pass\033[0m  \033[31m%d fail\033[0m\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
