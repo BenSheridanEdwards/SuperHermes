@@ -55,3 +55,11 @@ Out of scope: anything that hardcodes a specific fleet, agent, or operator.
 
 Open a GitHub issue with your OS, Docker version, and the output of a
 `--dry-run` reproduction where possible.
+
+## Licensing of contributions
+
+Unless you explicitly state otherwise, any contribution you intentionally
+submit for inclusion in this project shall be licensed under the MIT
+License (see the LICENSE file), without any additional terms or
+conditions, and you confirm that you have the right to submit it under
+that license.
