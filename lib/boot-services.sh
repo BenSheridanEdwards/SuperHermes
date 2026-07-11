@@ -36,7 +36,8 @@ render_normalised_scripts() {
   local pair tmpl dst
   mkdir -p "$PROFILE/scripts" 2>/dev/null || true
   for pair in "git-sync.sh.tmpl:git-sync.sh" \
-              "memory-health-snapshot.py.tmpl:memory_health_snapshot.py"; do
+              "memory-health-snapshot.py.tmpl:memory_health_snapshot.py" \
+              "cron-registry-snapshot.py.tmpl:cron_registry_snapshot.py"; do
     tmpl="$REPO/templates/${pair%%:*}"; dst="$PROFILE/scripts/${pair##*:}"
     [ -f "$tmpl" ] || continue   # partial checkout: never wipe a working script
     if AGENT_NAME="$NAME" AGENT_SLUG="$SLUG" AGENT_ROOT="$AGENT_ROOT" python3 -c \
@@ -47,6 +48,10 @@ render_normalised_scripts() {
       rm -f "$dst.tmp"
     fi
   done
+  python3 "$PROFILE/scripts/cron_registry_snapshot.py" || {
+    warn "cron registry definition could not be reconciled"
+    return 1
+  }
 }
 
 boot_agent_services() {
@@ -59,7 +64,7 @@ boot_agent_services() {
   # index.lock until the scripts were re-rendered by hand (incident 2026-06-20).
   say "services: re-render normalised scripts"
   render_normalised_scripts
-  ok "normalised scripts in sync with templates (git-sync.sh, memory_health_snapshot.py)"
+  ok "normalised scripts in sync with templates (git-sync.sh, memory_health_snapshot.py, cron_registry_snapshot.py)"
 
   say "services: preflight"
   { command -v docker >/dev/null && docker info >/dev/null 2>&1; } || { warn "Docker not running — cannot boot services"; return 1; }

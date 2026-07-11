@@ -1,0 +1,70 @@
+#!/usr/bin/env python3
+"""Persist durable cron definitions and restore a missing runtime registry."""
+
+from __future__ import annotations
+
+import json
+import os
+from pathlib import Path
+
+
+PROFILE = Path("__AGENT_ROOT__/.hermes/profiles/__AGENT_SLUG__")
+RUNTIME_REGISTRY_KEYS = {"updated_at"}
+RUNTIME_JOB_KEYS = {
+    "created_at",
+    "fire_claim",
+    "last_delivery_error",
+    "last_error",
+    "last_run_at",
+    "last_status",
+    "model_snapshot",
+    "next_run_at",
+    "paused_at",
+    "paused_reason",
+    "provider_snapshot",
+    "run_claim",
+    "schedule_display",
+    "state",
+}
+
+
+def stable_job(job: dict) -> dict:
+    definition = {key: value for key, value in job.items() if key not in RUNTIME_JOB_KEYS}
+    repeat = definition.get("repeat")
+    if isinstance(repeat, dict):
+        definition["repeat"] = {key: value for key, value in repeat.items() if key != "completed"}
+    return definition
+
+
+def snapshot() -> None:
+    source = PROFILE / "cron" / "jobs.json"
+    destination = PROFILE / "cron" / "jobs.definition.json"
+    if not source.exists():
+        definition = json.loads(destination.read_text())
+        if not isinstance(definition, dict) or not isinstance(definition.get("jobs"), list):
+            raise ValueError("cron definition must be an object with a jobs list")
+        temporary = source.with_suffix(source.suffix + ".tmp")
+        temporary.write_text(json.dumps(definition, indent=2, ensure_ascii=False) + "\n")
+        os.replace(temporary, source)
+        return
+    registry = json.loads(source.read_text())
+    if not isinstance(registry, dict) or not isinstance(registry.get("jobs"), list):
+        raise ValueError("cron registry must be an object with a jobs list")
+    for job in registry["jobs"]:
+        if not isinstance(job, dict):
+            raise ValueError("every cron job must be an object")
+
+    definition = {
+        key: value
+        for key, value in registry.items()
+        if key not in RUNTIME_REGISTRY_KEYS and key != "jobs"
+    }
+    definition["jobs"] = [stable_job(job) for job in registry["jobs"]]
+
+    temporary = destination.with_suffix(destination.suffix + ".tmp")
+    temporary.write_text(json.dumps(definition, indent=2, ensure_ascii=False) + "\n")
+    os.replace(temporary, destination)
+
+
+if __name__ == "__main__":
+    snapshot()

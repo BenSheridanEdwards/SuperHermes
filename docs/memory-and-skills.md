@@ -51,7 +51,10 @@ index, embeddings, and MCP tools (see below).
 A mature profile runs **one daily memory-maintenance cron** doing both jobs in a
 single snapshot-fed LLM run. A small read-only `memory_health_snapshot` script
 gathers *real* vault/GBrain/Honcho numbers via the agent's **own** wrapper and
-injects them as context, so the run works from ground truth. It then **consolidates**
+injects them as context, so the run works from ground truth. The job runs from
+the agent root with only the file, terminal, session-search, and memory toolsets;
+its prompt limits retrieval and asks the agent to finish within eight model calls.
+It then **consolidates**
 (distils recent sessions + Honcho's durable distillate into the right topical GBrain
 pages, idempotently — read-before-write, never dated dumps) and runs **hygiene**
 (scans both layers for poison, staleness, identity drift, broken retrieval,
@@ -59,6 +62,9 @@ duplicate/conflicting memory, CLI↔MCP split-brain). One job, not two, shares t
 snapshot and halves token cost. It's scheduled just before the nightly identity
 git-sync so the backup captures the new pages — and the deterministic git-sync stays
 a **separate** `no_agent` job so the backup runs even if the LLM run fails.
+Only the durable `cron/jobs.definition.json` snapshot is committed. The live
+`cron/jobs.json` registry is scheduler-owned and ignored, preventing run claims
+and completion timestamps from dirtying the identity repository after backup.
 
 > LocalMem is deprecated/rescue-only. Treat old exports as evidence for curated
 > migration, not active memory.

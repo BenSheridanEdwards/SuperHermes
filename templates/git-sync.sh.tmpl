@@ -33,6 +33,7 @@ NAME="__AGENT_NAME__"
 SLUG="__AGENT_SLUG__"
 BRANCH="${AGENT_GIT_BRANCH:-main}"
 SCRATCH="${TMPDIR:-/tmp}/${SLUG}-gitsync-secrets.txt"
+CRON_SNAPSHOT="$ROOT/.hermes/profiles/$SLUG/scripts/cron_registry_snapshot.py"
 
 cd "$ROOT" 2>/dev/null || { echo "git-sync: no directory at $ROOT"; exit 1; }
 [ -d .git ] || { echo "git-sync: $ROOT is not a git repo"; exit 1; }
@@ -47,6 +48,16 @@ cd "$ROOT" 2>/dev/null || { echo "git-sync: no directory at $ROOT"; exit 1; }
 lock=".git/index.lock"
 if [ -f "$lock" ] && ! lsof "$lock" >/dev/null 2>&1; then
   rm -f "$lock"
+fi
+
+# The live Hermes registry mixes durable job definitions with last-run state.
+# Snapshot only the durable definition before staging so scheduler heartbeats,
+# claims, and completion timestamps can never create identity-history churn.
+if [ -f "$CRON_SNAPSHOT" ]; then
+  python3 "$CRON_SNAPSHOT" || {
+    echo "git-sync: cron definition snapshot failed — preserving the last good backup"
+    exit 1
+  }
 fi
 
 push_if_approved() {
