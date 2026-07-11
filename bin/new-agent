@@ -254,7 +254,9 @@ export MAINT_ID="$(openssl rand -hex 6 2>/dev/null || echo maint-$SLUG)" \
 render "$REPO/templates/cron-jobs.json.tmpl" > "$PROFILE/cron/jobs.json"
 # normalised cron scripts: memory-maintenance context snapshot + daily git-sync
 render "$REPO/templates/memory-health-snapshot.py.tmpl" > "$PROFILE/scripts/memory_health_snapshot.py"; chmod +x "$PROFILE/scripts/memory_health_snapshot.py"
+render "$REPO/templates/cron-registry-snapshot.py.tmpl" > "$PROFILE/scripts/cron_registry_snapshot.py"; chmod +x "$PROFILE/scripts/cron_registry_snapshot.py"
 render "$REPO/templates/git-sync.sh.tmpl" > "$PROFILE/scripts/git-sync.sh"; chmod +x "$PROFILE/scripts/git-sync.sh"
+python3 "$PROFILE/scripts/cron_registry_snapshot.py" || die "could not snapshot durable cron definitions"
 # normalised root .gitignore (default-deny; per-agent copy of the fleet standard)
 render "$REPO/templates/gitignore.tmpl" > "$AGENT_ROOT/.gitignore"
 ok "honcho.json + SOUL + MEMORY/USER + .env(secret keys) + cron(memory-maintenance + git-sync) + root .gitignore"
@@ -297,8 +299,8 @@ cat > "$LA/ai.hermes.gateway-$SLUG.plist" <<PLIST
   <key>Label</key><string>ai.hermes.gateway-$SLUG</string>
   <key>ProgramArguments</key><array>
     <string>/usr/bin/sandbox-exec</string><string>-f</string><string>$AGENT_ROOT/.hermes/sandbox/$SLUG.sb</string>
-    <string>$HERMES_VENV/bin/python</string><string>-m</string><string>hermes_cli.main</string>
-    <string>--profile</string><string>$SLUG</string><string>gateway</string><string>run</string><string>--replace</string>
+    <string>/Users/agents/Agents/Shared/bin/hermes-gateway-launch</string>
+    <string>$SLUG</string><string>$PROFILE</string>
   </array>
   <key>WorkingDirectory</key><string>$AGENT_ROOT/workspace</string>
   <key>EnvironmentVariables</key><dict>

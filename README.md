@@ -140,7 +140,9 @@ Two daily baseline crons keep memory and identity durable:
 
 - **Memory maintenance** — one snapshot-fed LLM run. A read-only
   `memory_health_snapshot` script injects *real* vault/GBrain/Honcho numbers as
-  context, then the agent **consolidates** — distils recent sessions *and*
+  context. The routine is scoped to the agent root, exposes only the file,
+  terminal, session-search, and memory toolsets, and carries an eight-call
+  operating budget. It then **consolidates** — distils one bounded session result and
   **harvests Honcho's durable distillate** (peer card → `honcho_search` →
   optional dialectic synthesis) into the right *topical* GBrain pages,
   idempotently (read-before-write, never dated dumps) — and runs **hygiene**
@@ -148,7 +150,9 @@ Two daily baseline crons keep memory and identity durable:
 - **Identity git-sync** (runs just after) — a deterministic `no_agent` backup
   that commits the agent's durable identity to its own git repo behind a secret
   tripwire. Kept *separate* from the LLM run on purpose: the backup must be the
-  one thing that always works, even on a day the maintenance run fails.
+  one thing that always works, even on a day the maintenance run fails. Git
+  stores `jobs.definition.json`; Hermes owns the ignored `jobs.json`, so claims
+  and last-run timestamps cannot create identity-history churn.
 
 ### 5. Skills — shared procedural memory
 Repeatable workflows live once in a shared skills library; every agent's
@@ -268,7 +272,8 @@ AGENTS_ROOT/<Name>/                    ← the agent's own git repo root
 │   │   ├── SOUL.md                   identity (the one personal file)
 │   │   ├── .env                      secret KEYS (Telegram/GitHub/Google; gitignored)
 │   │   ├── auth.json                 credentials (never committed)
-│   │   ├── cron/jobs.json            daily memory-maintenance + identity git-sync
+│   │   ├── cron/jobs.definition.json durable routine definitions (tracked)
+│   │   ├── cron/jobs.json            live scheduler state (ignored)
 │   │   ├── home/.gbrain/             canonical pglite store + config.json
 │   │   └── memories/{MEMORY,USER}.md bootstrap memory
 │   └── honcho/honcho/                Dockerized memory stack
