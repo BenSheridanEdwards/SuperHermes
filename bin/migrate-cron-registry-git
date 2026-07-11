@@ -1,0 +1,119 @@
+#!/usr/bin/env bash
+# Move one existing agent from a tracked live cron registry to a tracked,
+# durable definition snapshot. The live jobs.json remains untouched for Hermes.
+set -euo pipefail
+
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+AGENTS_ROOT="${AGENTS_ROOT:-/Users/agents/Agents}"
+NAME=""
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --name) NAME="${2:-}"; shift 2 ;;
+    -h|--help) sed -n '2,4p' "$0"; exit 0 ;;
+    *) echo "error: unknown argument: $1" >&2; exit 2 ;;
+  esac
+done
+
+[ -n "$NAME" ] || { echo "error: missing --name" >&2; exit 2; }
+[[ "$NAME" =~ ^[A-Za-z][A-Za-z0-9]*$ ]] || { echo "error: invalid agent name: $NAME" >&2; exit 2; }
+
+SLUG="$(printf '%s' "$NAME" | tr '[:upper:]' '[:lower:]')"
+AGENT_ROOT="$AGENTS_ROOT/$NAME"
+PROFILE="$AGENT_ROOT/.hermes/profiles/$SLUG"
+LIVE_REGISTRY="$PROFILE/cron/jobs.json"
+DEFINITION="$PROFILE/cron/jobs.definition.json"
+
+[ -d "$AGENT_ROOT/.git" ] || { echo "error: not an agent git repo: $AGENT_ROOT" >&2; exit 1; }
+[ -f "$LIVE_REGISTRY" ] || { echo "error: live cron registry missing: $LIVE_REGISTRY" >&2; exit 1; }
+[ -f "$AGENT_ROOT/.gitignore" ] || { echo "error: agent gitignore missing: $AGENT_ROOT/.gitignore" >&2; exit 1; }
+mkdir -p "$PROFILE/scripts"
+
+render() {
+  AGENT_NAME="$NAME" AGENT_SLUG="$SLUG" AGENT_ROOT="$AGENT_ROOT" python3 -c \
+    'import os,re,sys;sys.stdout.write(re.sub(r"__([A-Z_]+)__",lambda match:os.environ.get(match.group(1),match.group(0)),open(sys.argv[1]).read()))' \
+    "$1"
+}
+
+render "$REPO/templates/cron-registry-snapshot.py.tmpl" > "$PROFILE/scripts/cron_registry_snapshot.py.tmp"
+mv "$PROFILE/scripts/cron_registry_snapshot.py.tmp" "$PROFILE/scripts/cron_registry_snapshot.py"
+chmod +x "$PROFILE/scripts/cron_registry_snapshot.py"
+
+render "$REPO/templates/git-sync.sh.tmpl" > "$PROFILE/scripts/git-sync.sh.tmp"
+mv "$PROFILE/scripts/git-sync.sh.tmp" "$PROFILE/scripts/git-sync.sh"
+chmod +x "$PROFILE/scripts/git-sync.sh"
+
+AGENT_NAME="$NAME" AGENT_SLUG="$SLUG" AGENT_ROOT="$AGENT_ROOT" python3 - \
+  "$LIVE_REGISTRY" "$REPO/templates/cron-jobs.json.tmpl" "$PROFILE/config.yaml" <<'PY'
+import json
+import os
+import re
+import sys
+from pathlib import Path
+
+live_registry = Path(sys.argv[1])
+template_path = Path(sys.argv[2])
+config_path = Path(sys.argv[3])
+
+template_text = re.sub(
+    r"__([A-Z_]+)__",
+    lambda match: os.environ.get(match.group(1), match.group(0)),
+    template_path.read_text(),
+)
+canonical_jobs = json.loads(template_text)["jobs"]
+canonical_maintenance = next(job for job in canonical_jobs if job["name"] == "Daily memory maintenance")
+registry = json.loads(live_registry.read_text())
+maintenance = next((job for job in registry.get("jobs", []) if job.get("name") == "Daily memory maintenance"), None)
+if maintenance is not None:
+    for key in ("prompt", "skill", "script", "enabled_toolsets", "workdir"):
+        maintenance[key] = canonical_maintenance[key]
+    live_registry.write_text(json.dumps(registry, indent=2, ensure_ascii=False) + "\n")
+
+if config_path.exists():
+    lines = config_path.read_text().splitlines()
+    in_agent = False
+    changed = False
+    for line_number, line in enumerate(lines):
+        if line and not line.startswith((" ", "\t", "#")):
+            in_agent = line.strip() == "agent:"
+            continue
+        if in_agent and re.match(r"^\s+max_turns:\s*\d+\s*$", line):
+            current = int(line.split(":", 1)[1].strip())
+            if current > 24:
+                indentation = line[: len(line) - len(line.lstrip())]
+                lines[line_number] = f"{indentation}max_turns: 24"
+                changed = True
+            break
+    if changed:
+        config_path.write_text("\n".join(lines) + "\n")
+PY
+
+python3 - "$AGENT_ROOT/.gitignore" "$SLUG" <<'PY'
+import sys
+from pathlib import Path
+
+gitignore = Path(sys.argv[1])
+slug = sys.argv[2]
+live = f"!/.hermes/profiles/{slug}/cron/jobs.json"
+definition = f"!/.hermes/profiles/{slug}/cron/jobs.definition.json"
+text = gitignore.read_text()
+if definition not in text:
+    if live not in text:
+        raise SystemExit("error: gitignore is not the SuperHermes cron registry shape")
+    text = text.replace(live, definition)
+    gitignore.write_text(text)
+PY
+
+python3 "$PROFILE/scripts/cron_registry_snapshot.py"
+
+relative_live=".hermes/profiles/$SLUG/cron/jobs.json"
+relative_definition=".hermes/profiles/$SLUG/cron/jobs.definition.json"
+git -C "$AGENT_ROOT" rm --cached --ignore-unmatch -q -- "$relative_live"
+git -C "$AGENT_ROOT" add -- \
+  .gitignore \
+  ".hermes/profiles/$SLUG/config.yaml" \
+  "$relative_definition" \
+  ".hermes/profiles/$SLUG/scripts/cron_registry_snapshot.py" \
+  ".hermes/profiles/$SLUG/scripts/git-sync.sh"
+
+printf 'migrated %s: durable cron definitions tracked; live scheduler state ignored\n' "$NAME"

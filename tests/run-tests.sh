@@ -30,7 +30,9 @@ mkdir -p .hermes/profiles/test/{memories,cron,scripts,skills/x} .hermes/sandbox 
          .hermes/honcho/honcho .home/.gbrain vault/brain workspace/clone
 for f in .hermes/profiles/test/config.yaml .hermes/profiles/test/honcho.json \
          .hermes/profiles/test/SOUL.md .hermes/profiles/test/memories/MEMORY.md \
-         .hermes/profiles/test/cron/jobs.json .hermes/profiles/test/scripts/s.sh \
+         .hermes/profiles/test/cron/jobs.json \
+         .hermes/profiles/test/cron/jobs.definition.json \
+         .hermes/profiles/test/scripts/s.sh \
          .hermes/sandbox/test.sb README.md; do echo x > "$f"; done
 for f in .hermes/profiles/test/.env .hermes/profiles/test/auth.json \
          .hermes/profiles/test/google_token.json .hermes/profiles/test/skills/x/SKILL.md \
@@ -40,7 +42,9 @@ git init -q && git add -A 2>/dev/null
 TR="$(git ls-files)"
 for want in .hermes/profiles/test/config.yaml .hermes/profiles/test/SOUL.md \
             .hermes/profiles/test/honcho.json .hermes/profiles/test/memories/MEMORY.md \
+            .hermes/profiles/test/cron/jobs.definition.json \
             .hermes/sandbox/test.sb README.md; do assert_has "$TR" "$want" "tracks $want"; done
+assert_hasnt "$TR" ".hermes/profiles/test/cron/jobs.json" "excludes volatile cron runtime registry"
 for deny in .env auth.json google_token.json vault/ workspace/ honcho/honcho .pglite skills/; do
   assert_hasnt "$TR" "$deny" "excludes $deny"; done
 cd "$REPO"; rm -rf "$T"
@@ -95,6 +99,12 @@ pl="$(cat "$td/LaunchAgents/ai.hermes.gateway-testunit.plist" 2>/dev/null)"
 assert_has "$pl" "Shared/bin/hermes-gateway-launch" "gateway plist uses shared launcher"
 assert_hasnt "$pl" "hermes_cli.main"                "gateway plist does not bypass shared launcher"
 assert_has "$pl" "<string>testunit</string>"        "gateway plist passes slug to launcher"
+configured_max_turns="$(python3 - "$td/TestUnit/.hermes/profiles/testunit/config.yaml" <<'PY'
+import sys,yaml
+print(yaml.safe_load(open(sys.argv[1]))["agent"]["max_turns"])
+PY
+)"
+[ "$configured_max_turns" -le 24 ] && ok "new agents have a bounded model-turn budget" || bad "new agents must not inherit a 150-turn model budget"
 python3 -m json.tool "$REPO/templates/agent-template.json" >/dev/null 2>&1 \
   && ok "agent template manifest parses" || bad "agent template manifest parses"
 AGENTS_ROOT=""; [ -f "$REPO/superhermes.conf" ] && . "$REPO/superhermes.conf" || . "$REPO/superhermes.conf.example"
@@ -141,6 +151,123 @@ assert_hasnt "$snap" "Shared/bin/gbrain"            "snapshot does NOT use the s
 rm -rf "$T"
 
 # ---------------------------------------------------------------------------
+section "cron registry snapshot — durable definitions exclude runtime state"
+T="$(mktemp -d)"
+PROFILE="$T/Test/.hermes/profiles/test"
+mkdir -p "$PROFILE/cron" "$PROFILE/scripts"
+A_NAME=Test A_SLUG=test A_ROOT="$T/Test" render "$REPO/templates/cron-registry-snapshot.py.tmpl" > "$PROFILE/scripts/cron_registry_snapshot.py"
+cat > "$PROFILE/cron/jobs.json" <<'JSON'
+{
+  "jobs": [{
+    "id": "daily",
+    "name": "Daily identity git-sync",
+    "script": "git-sync.sh",
+    "no_agent": true,
+    "schedule": {"kind": "cron", "expr": "0 0 * * *"},
+    "enabled": true,
+    "state": "scheduled",
+    "created_at": "2026-07-11T00:00:00Z",
+    "next_run_at": "2026-07-12T00:00:00Z",
+    "last_run_at": "2026-07-11T00:00:00Z",
+    "last_status": "ok",
+    "last_error": null,
+    "fire_claim": {"at": "2026-07-11T00:00:00Z", "by": "host:1"},
+    "repeat": {"times": 10, "completed": 3}
+  }],
+  "updated_at": "2026-07-11T00:00:01Z"
+}
+JSON
+out="$(python3 "$PROFILE/scripts/cron_registry_snapshot.py" 2>&1)"; rc=$?
+assert_eq "$rc" "0" "snapshot exits 0"
+assert_eq "$out" "" "snapshot is silent"
+definition="$(cat "$PROFILE/cron/jobs.definition.json" 2>/dev/null)"
+assert_has "$definition" '"name": "Daily identity git-sync"' "snapshot keeps routine definition"
+assert_has "$definition" '"expr": "0 0 * * *"' "snapshot keeps routine schedule"
+assert_hasnt "$definition" 'last_run_at' "snapshot removes last_run_at"
+assert_hasnt "$definition" 'fire_claim' "snapshot removes fire_claim"
+assert_hasnt "$definition" 'updated_at' "snapshot removes registry updated_at"
+assert_hasnt "$definition" '"completed"' "snapshot removes repeat progress"
+rm "$PROFILE/cron/jobs.json"
+python3 "$PROFILE/scripts/cron_registry_snapshot.py" >/dev/null 2>&1; rc=$?
+assert_eq "$rc" "0" "missing runtime registry restores from durable definition"
+assert_has "$(cat "$PROFILE/cron/jobs.json")" '"name": "Daily identity git-sync"' "restored runtime registry keeps job definition"
+assert_hasnt "$(cat "$PROFILE/cron/jobs.json")" 'last_run_at' "restored runtime registry starts without stale execution state"
+cp "$PROFILE/cron/jobs.definition.json" "$T/before.json" 2>/dev/null || true
+printf '{broken' > "$PROFILE/cron/jobs.json"
+python3 "$PROFILE/scripts/cron_registry_snapshot.py" >/dev/null 2>&1; rc=$?
+[ "$rc" != "0" ] && ok "malformed registry fails closed" || bad "malformed registry must fail closed"
+cmp -s "$T/before.json" "$PROFILE/cron/jobs.definition.json" \
+  && ok "malformed registry preserves last good definition" \
+  || bad "malformed registry overwrote last good definition"
+rm -rf "$T"
+
+# ---------------------------------------------------------------------------
+section "identity git-sync — scheduler metadata never dirties the identity repo"
+T="$(mktemp -d)"; ROOT="$T/Test"; PROFILE="$ROOT/.hermes/profiles/test"
+mkdir -p "$PROFILE/cron" "$PROFILE/scripts"
+A_NAME=Test A_SLUG=test A_ROOT="$ROOT" render "$REPO/templates/gitignore.tmpl" > "$ROOT/.gitignore"
+A_NAME=Test A_SLUG=test A_ROOT="$ROOT" render "$REPO/templates/cron-registry-snapshot.py.tmpl" > "$PROFILE/scripts/cron_registry_snapshot.py"
+A_NAME=Test A_SLUG=test A_ROOT="$ROOT" render "$REPO/templates/git-sync.sh.tmpl" > "$PROFILE/scripts/git-sync.sh"
+chmod +x "$PROFILE/scripts/cron_registry_snapshot.py" "$PROFILE/scripts/git-sync.sh"
+cat > "$PROFILE/cron/jobs.json" <<'JSON'
+{"jobs":[{"id":"daily","name":"Daily identity git-sync","script":"git-sync.sh","no_agent":true,"schedule":{"kind":"cron","expr":"0 0 * * *"},"enabled":true,"last_run_at":null,"last_status":null}],"updated_at":"one"}
+JSON
+python3 "$PROFILE/scripts/cron_registry_snapshot.py"
+git -C "$ROOT" init -q
+git -C "$ROOT" add -A
+git -C "$ROOT" -c user.name=t -c user.email=t@t commit -qm init
+python3 - "$PROFILE/cron/jobs.json" <<'PY'
+import json,sys
+p=sys.argv[1]; data=json.load(open(p)); data["jobs"][0]["last_run_at"]="2026-07-11T00:00:00Z"; data["jobs"][0]["last_status"]="ok"; data["updated_at"]="two"; open(p,"w").write(json.dumps(data))
+PY
+n0="$(git -C "$ROOT" rev-list --count HEAD)"
+AGENT_GIT_ROOT="$ROOT" bash "$PROFILE/scripts/git-sync.sh" >/dev/null 2>&1; rc=$?
+n1="$(git -C "$ROOT" rev-list --count HEAD)"
+assert_eq "$rc" "0" "metadata-only sync exits 0"
+assert_eq "$n1" "$n0" "metadata-only sync creates no commit"
+assert_eq "$(git -C "$ROOT" status --porcelain)" "" "metadata-only scheduler write leaves repo clean"
+python3 - "$PROFILE/cron/jobs.json" <<'PY'
+import json,sys
+p=sys.argv[1]; data=json.load(open(p)); data["jobs"][0]["schedule"]["expr"]="30 0 * * *"; data["updated_at"]="three"; open(p,"w").write(json.dumps(data))
+PY
+AGENT_GIT_ROOT="$ROOT" bash "$PROFILE/scripts/git-sync.sh" >/dev/null 2>&1; rc=$?
+n2="$(git -C "$ROOT" rev-list --count HEAD)"
+assert_eq "$rc" "0" "definition change sync exits 0"
+assert_eq "$n2" "$((n1+1))" "definition change creates one commit"
+assert_eq "$(git -C "$ROOT" status --porcelain)" "" "definition change leaves repo clean"
+assert_has "$(git -C "$ROOT" show HEAD:.hermes/profiles/test/cron/jobs.definition.json)" '30 0 * * *' "commit stores updated routine definition"
+rm -rf "$T"
+
+# ---------------------------------------------------------------------------
+section "migrate-cron-registry-git — upgrades an existing agent without a roster"
+T="$(mktemp -d)"; ROOT="$T/Agents/Test"; PROFILE="$ROOT/.hermes/profiles/test"
+mkdir -p "$PROFILE/cron" "$PROFILE/scripts"
+A_NAME=Test A_SLUG=test A_ROOT="$ROOT" render "$REPO/templates/gitignore.tmpl" \
+  | sed 's#jobs.definition.json#jobs.json#' > "$ROOT/.gitignore"
+printf '{"jobs":[{"id":"memory","name":"Daily memory maintenance","prompt":"unbounded","skill":"memory-architecture","script":"memory_health_snapshot.py","schedule":{"kind":"cron","expr":"0 23 * * *"},"enabled":true},{"id":"daily","name":"Daily identity git-sync","script":"git-sync.sh","no_agent":true,"schedule":{"kind":"cron","expr":"0 0 * * *"},"enabled":true,"last_run_at":"2026-07-11T00:00:00Z","last_status":"ok"}],"updated_at":"runtime"}\n' > "$PROFILE/cron/jobs.json"
+printf 'agent:\n  max_turns: 150\n' > "$PROFILE/config.yaml"
+printf 'legacy sync\n' > "$PROFILE/scripts/git-sync.sh"
+git -C "$ROOT" init -q
+git -C "$ROOT" add -A
+git -C "$ROOT" -c user.name=t -c user.email=t@t commit -qm init
+AGENTS_ROOT="$T/Agents" bash "$REPO/bin/migrate-cron-registry-git" --name Test >/dev/null 2>&1; rc=$?
+assert_eq "$rc" "0" "migration exits 0"
+tracked="$(git -C "$ROOT" ls-files)"
+assert_has "$tracked" ".hermes/profiles/test/cron/jobs.definition.json" "migration tracks durable definition"
+assert_hasnt "$tracked" ".hermes/profiles/test/cron/jobs.json" "migration untracks live registry"
+assert_has "$(cat "$ROOT/.gitignore")" "jobs.definition.json" "migration updates gitignore"
+assert_has "$(cat "$PROFILE/scripts/git-sync.sh")" "cron_registry_snapshot.py" "migration installs snapshot-aware git-sync"
+assert_has "$(cat "$PROFILE/config.yaml")" "max_turns: 24" "migration bounds existing agent model turns"
+assert_has "$(cat "$PROFILE/cron/jobs.definition.json")" '"workdir": "'"$ROOT"'"' "migration scopes memory maintenance to the agent root"
+assert_has "$(cat "$PROFILE/cron/jobs.definition.json")" 'at most 8 model calls' "migration bounds memory maintenance model calls"
+[ -x "$PROFILE/scripts/cron_registry_snapshot.py" ] && ok "migration installs executable snapshot helper" || bad "migration installs executable snapshot helper"
+AGENT_GIT_ROOT="$ROOT" bash "$PROFILE/scripts/git-sync.sh" >/dev/null 2>&1; rc=$?
+assert_eq "$rc" "0" "migrated git-sync commits the upgrade"
+printf '{"jobs":[{"id":"daily","name":"Daily identity git-sync","script":"git-sync.sh","no_agent":true,"schedule":{"kind":"cron","expr":"0 0 * * *"},"enabled":true,"last_run_at":"2026-07-12T00:00:00Z","last_status":"ok"}],"updated_at":"later"}\n' > "$PROFILE/cron/jobs.json"
+assert_eq "$(git -C "$ROOT" status --porcelain)" "" "migrated runtime metadata stays clean"
+rm -rf "$T"
+
+# ---------------------------------------------------------------------------
 section "cron-jobs.json.tmpl — renders valid, maintenance is snapshot-fed, git-sync standalone"
 T="$(mktemp -d)"
 AGENT_NAME=Probe AGENT_ROOT=/tmp/Probe MAINT_ID=m SYNC_ID=s NOW=n \
@@ -153,18 +280,23 @@ m=next((x for x in j if x["name"]=="Daily memory maintenance"),{})
 g=next((x for x in j if x.get("script")=="git-sync.sh"),{})
 print("VALID" if len(j)==2 else "BADCOUNT")
 print("MAINT_OK" if m.get("script")=="memory_health_snapshot.py" and m.get("skill")=="memory-architecture" and not m.get("no_agent") else "MAINT_BAD")
+print("MAINT_SCOPED" if m.get("workdir")=="/tmp/Probe" and m.get("enabled_toolsets")==["file","terminal","session_search","memory"] else "MAINT_UNSCOPED")
+print("MAINT_BOUNDED" if "one session_search discovery with limit=1" in m.get("prompt","") and "at most 8 model calls" in m.get("prompt","") else "MAINT_UNBOUNDED")
 print("SYNC_OK" if g.get("no_agent") is True else "SYNC_BAD")
 PY
 )"
 assert_has "$chk" "VALID"     "renders exactly 2 jobs"
 assert_has "$chk" "MAINT_OK"  "maintenance = script(snapshot)+skill, LLM job"
+assert_has "$chk" "MAINT_SCOPED" "maintenance is restricted to its agent root and necessary toolsets"
+assert_has "$chk" "MAINT_BOUNDED" "maintenance prompt carries explicit retrieval and model-call budgets"
 assert_has "$chk" "SYNC_OK"   "git-sync = standalone no_agent job"
 rm -rf "$T"
 
 # ---------------------------------------------------------------------------
 section "boot-services — a restart re-renders stale normalised scripts (drift self-heal)"
 T="$(mktemp -d)"; PR="$T/Probe"; PROF="$PR/.hermes/profiles/probe"
-mkdir -p "$PROF/scripts"
+mkdir -p "$PROF/scripts" "$PROF/cron"
+printf '{"jobs":[],"updated_at":"runtime"}\n' > "$PROF/cron/jobs.json"
 # A restart inherits whatever stale rendered copies the agent already has on disk.
 echo "STALE git-sync" > "$PROF/scripts/git-sync.sh"
 echo "STALE snapshot" > "$PROF/scripts/memory_health_snapshot.py"
@@ -174,8 +306,11 @@ echo "STALE snapshot" > "$PROF/scripts/memory_health_snapshot.py"
   NAME=Probe SLUG=probe AGENT_ROOT="$PR" PROFILE="$PROF" render_normalised_scripts ) >/dev/null 2>&1
 want_gs="$(A_NAME=Probe A_SLUG=probe A_ROOT="$PR" render "$REPO/templates/git-sync.sh.tmpl")"
 want_ms="$(A_NAME=Probe A_SLUG=probe A_ROOT="$PR" render "$REPO/templates/memory-health-snapshot.py.tmpl")"
+want_cs="$(A_NAME=Probe A_SLUG=probe A_ROOT="$PR" render "$REPO/templates/cron-registry-snapshot.py.tmpl")"
 assert_eq "$(cat "$PROF/scripts/git-sync.sh")"               "$want_gs" "boot re-renders stale git-sync.sh to match template"
 assert_eq "$(cat "$PROF/scripts/memory_health_snapshot.py")" "$want_ms" "boot re-renders stale snapshot to match template"
+assert_eq "$(cat "$PROF/scripts/cron_registry_snapshot.py")" "$want_cs" "boot renders cron registry snapshot helper"
+assert_has "$(cat "$PROF/cron/jobs.definition.json")" '"jobs": []' "boot creates durable cron definitions for existing agents"
 [ -x "$PROF/scripts/git-sync.sh" ] && ok "re-rendered git-sync.sh stays executable" || bad "re-rendered git-sync.sh stays executable"
 # Guard: a missing template (partial checkout) must NOT wipe the working script.
 echo "KEEP" > "$PROF/scripts/git-sync.sh"
