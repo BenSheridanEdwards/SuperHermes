@@ -239,10 +239,10 @@ assert_has "$(git -C "$ROOT" show HEAD:.hermes/profiles/test/cron/jobs.definitio
 rm -rf "$T"
 
 # ---------------------------------------------------------------------------
-section "migrate-cron-registry-git — upgrades an existing agent without a roster"
-T="$(mktemp -d)"; ROOT="$T/Agents/Test"; PROFILE="$ROOT/.hermes/profiles/test"
+section "migrate-cron-registry-git — upgrades an arbitrary nested agent without a roster"
+T="$(mktemp -d)"; ROOT="$T/Agents/Clients/Future Client/Future Agent"; PROFILE="$ROOT/.hermes/profiles/future-agent"
 mkdir -p "$PROFILE/cron" "$PROFILE/scripts"
-A_NAME=Test A_SLUG=test A_ROOT="$ROOT" render "$REPO/templates/gitignore.tmpl" \
+A_NAME="Future Client's Agent" A_SLUG=future-agent A_ROOT="$ROOT" render "$REPO/templates/gitignore.tmpl" \
   | sed 's#jobs.definition.json#jobs.json#' > "$ROOT/.gitignore"
 printf '{"jobs":[{"id":"memory","name":"Daily memory maintenance","prompt":"unbounded","skill":"memory-architecture","script":"memory_health_snapshot.py","schedule":{"kind":"cron","expr":"0 23 * * *"},"enabled":true},{"id":"daily","name":"Daily identity git-sync","script":"git-sync.sh","no_agent":true,"schedule":{"kind":"cron","expr":"0 0 * * *"},"enabled":true,"last_run_at":"2026-07-11T00:00:00Z","last_status":"ok"}],"updated_at":"runtime"}\n' > "$PROFILE/cron/jobs.json"
 printf 'agent:\n  max_turns: 150\n' > "$PROFILE/config.yaml"
@@ -250,11 +250,12 @@ printf 'legacy sync\n' > "$PROFILE/scripts/git-sync.sh"
 git -C "$ROOT" init -q
 git -C "$ROOT" add -A
 git -C "$ROOT" -c user.name=t -c user.email=t@t commit -qm init
-AGENTS_ROOT="$T/Agents" bash "$REPO/bin/migrate-cron-registry-git" --name Test >/dev/null 2>&1; rc=$?
+AGENTS_ROOT="$T/Agents" bash "$REPO/bin/migrate-cron-registry-git" \
+  --agent-root "$ROOT" --name "Future Client's Agent" --slug future-agent >/dev/null 2>&1; rc=$?
 assert_eq "$rc" "0" "migration exits 0"
 tracked="$(git -C "$ROOT" ls-files)"
-assert_has "$tracked" ".hermes/profiles/test/cron/jobs.definition.json" "migration tracks durable definition"
-assert_hasnt "$tracked" ".hermes/profiles/test/cron/jobs.json" "migration untracks live registry"
+assert_has "$tracked" ".hermes/profiles/future-agent/cron/jobs.definition.json" "migration tracks durable definition"
+assert_hasnt "$tracked" ".hermes/profiles/future-agent/cron/jobs.json" "migration untracks live registry"
 assert_has "$(cat "$ROOT/.gitignore")" "jobs.definition.json" "migration updates gitignore"
 assert_has "$(cat "$PROFILE/scripts/git-sync.sh")" "cron_registry_snapshot.py" "migration installs snapshot-aware git-sync"
 assert_has "$(cat "$PROFILE/config.yaml")" "max_turns: 24" "migration bounds existing agent model turns"
