@@ -141,6 +141,16 @@ assert_has "$mc" "provider: opencode-go" "fallback #2 from --fallback"
 assert_has "$mc" "round_robin"           "round-robin from --round-robin"
 
 # ---------------------------------------------------------------------------
+section "gbrain-wrapper.tmpl — derives its agent root after a profile move"
+T="$(mktemp -d)"; ROOT="$T/Agents/Clients/Jake/Hunter"
+mkdir -p "$ROOT/.local/bin"
+A_NAME="Jake's Hunter" A_SLUG=hunter A_ROOT="$ROOT" render "$REPO/templates/gbrain-wrapper.tmpl" > "$ROOT/.local/bin/gbrain"
+wrapper="$(cat "$ROOT/.local/bin/gbrain")"
+assert_has "$wrapper" 'ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"' "wrapper derives root from its own location"
+assert_hasnt "$wrapper" "$ROOT" "wrapper does not bake the original agent root"
+rm -rf "$T"
+
+# ---------------------------------------------------------------------------
 section "memory-health-snapshot.py.tmpl — parses + uses the OWN gbrain wrapper"
 T="$(mktemp -d)"
 A_NAME=Probe A_SLUG=probe A_ROOT="$T/Probe" render "$REPO/templates/memory-health-snapshot.py.tmpl" > "$T/snap.py"
