@@ -3,10 +3,10 @@
 # new-agent — spin up a new SuperHermes agent from one command.
 #
 # Provisions the full anatomy (see README + docs/): profile dirs · town-square
-# sandbox · gateway + honcho-backup launchd plists · Hermes profile
-# (config.yaml, honcho.json, SOUL stub) · Honcho Docker stack (compose + .env +
-# backup, auto-allocated ports) · GBrain config + vault · shared-skills wiring.
+# sandbox · gateway launchd plist · Hermes profile
+# (config.yaml, SOUL stub) · GBrain config + vault · shared-skills wiring.
 # Then (default) starts services + registers launchd.
+# Honcho is not provisioned. Memory is GBrain only.
 #
 # Config: copy superhermes.conf.example → superhermes.conf and set AGENTS_ROOT.
 #
@@ -47,7 +47,7 @@ sys.stdout.write(re.sub(r"__([A-Z_]+)__", lambda m: os.environ.get(m.group(1), m
 PY
 }
 
-NAME="" CAMP="" TIER="" START="yes" DRYRUN=0 YES=0 WITH_HONCHO=0
+NAME="" CAMP="" TIER="" START="yes" DRYRUN=0 YES=0
 MODEL_PROVIDER="" MODEL_NAME="" FB1_PROVIDER="" FB1_MODEL="" FB2_PROVIDER="" FB2_MODEL="" ROUNDROBIN=""
 while [ $# -gt 0 ]; do case "$1" in
   --name) NAME="${2:-}"; shift 2;; --camp) CAMP="${2:-}"; shift 2;; --tier) TIER="${2:-}"; shift 2;;
@@ -55,9 +55,8 @@ while [ $# -gt 0 ]; do case "$1" in
   --fallback) if [ -z "$FB1_PROVIDER" ]; then FB1_PROVIDER="${2%%:*}"; FB1_MODEL="${2#*:}"; else FB2_PROVIDER="${2%%:*}"; FB2_MODEL="${2#*:}"; fi; shift 2;;
   --round-robin) ROUNDROBIN="y"; shift;;
   --no-start) START="no"; shift;; --start) START="yes"; shift;; --dry-run) DRYRUN=1; shift;;
-  --with-honcho) WITH_HONCHO=1; shift;; --no-honcho) WITH_HONCHO=0; shift;;
   --yes|-y) YES=1; shift;;
-  -h|--help) sed -n '2,25p' "$0"; exit 0;; *) die "unknown arg: $1";;
+  -h|--help) sed -n '2,22p' "$0"; exit 0;; *) die "unknown arg: $1";;
 esac; done
 
 ask(){ local __v="$1" __p="$2" __d="${3:-}" __r; [ -n "${!__v}" ] && return 0
@@ -128,16 +127,11 @@ export AGENT_SLUG="$(printf '%s' "$NAME" | tr '[:upper:]' '[:lower:]')"
 SLUG="$AGENT_SLUG"
 export AGENTS_ROOT
 export AGENT_ROOT="$AGENTS_ROOT/$NAME"
-export WORKSPACE="$SLUG-$CAMP" AI_PEER="$SLUG" PROJECT="honcho-$SLUG"
-PROFILE="$AGENT_ROOT/.hermes/profiles/$SLUG"; HONCHO_DIR="$AGENT_ROOT/.hermes/honcho"
+export WORKSPACE="$SLUG-$CAMP" AI_PEER="$SLUG"
+PROFILE="$AGENT_ROOT/.hermes/profiles/$SLUG"
 export WORKSPACE_CWD="$AGENT_ROOT/workspace" SKILLS_DIR GBRAIN_BIN
 case "$TIER" in s) export DLEVEL=minimal;; m) export DLEVEL=low;; l) export DLEVEL=medium;; esac
 LA="$HOME/Library/LaunchAgents"
-
-# ---- ports: next free triple. DB=5432+(API-8000), REDIS=6379+(API-8000) -----
-MAXAPI=$(grep -rhoE '127\.0\.0\.1:80[0-9][0-9]:8000' "$AGENTS_ROOT"/*/.hermes/honcho/honcho/docker-compose.yml 2>/dev/null \
-         | grep -oE '80[0-9][0-9]' | sort -n | tail -1)
-export API_PORT=$(( ${MAXAPI:-8000} + 1 )); export DB_PORT=$(( 5432 + API_PORT - 8000 )); export REDIS_PORT=$(( 6379 + API_PORT - 8000 ))
 
 # ---- sandbox boundary blocks ------------------------------------------------
 OTHER_AGENT_WRITE_RULES=""
@@ -166,27 +160,24 @@ export OTHER_AGENT_WRITE_RULES OTHER_USER_HOME_RULES
 # ---- preflight --------------------------------------------------------------
 [ -e "$AGENT_ROOT" ] && die "agent dir already exists: $AGENT_ROOT"
 [ -f "$REPO/templates/sandbox.sb.template" ] || die "missing bundled sandbox template"
-for p in "$API_PORT" "$DB_PORT" "$REDIS_PORT"; do
-  lsof -nP -iTCP:"$p" -sTCP:LISTEN >/dev/null 2>&1 && die "port $p already in use"; done
-
 echo; say "Plan for: $NAME"
 cat <<SUMMARY
   slug=$SLUG  camp=$CAMP  tier=$TIER (dialectic=$DLEVEL)
   root        $AGENT_ROOT
   workspace   $WORKSPACE   aiPeer=$AI_PEER
-  honcho      api=$API_PORT db=$DB_PORT redis=$REDIS_PORT  project=$PROJECT
+  memory      GBrain only
   sandbox     allow default; deny /Users/Shared, other user homes, cross-agent writes
   start now   $START$([ "$DRYRUN" = 1 ] && echo "   (DRY-RUN)")
 SUMMARY
 if [ "$DRYRUN" = 0 ] && [ "$YES" = 0 ]; then read -r -p "Proceed? [y/N] " yn; [[ "$yn" =~ ^[Yy] ]] || die "aborted"; fi
 if [ "$DRYRUN" = 1 ]; then TMP="$(mktemp -d)"; AGENT_ROOT="$TMP/$NAME"; export AGENT_ROOT
-  PROFILE="$AGENT_ROOT/.hermes/profiles/$SLUG"; HONCHO_DIR="$AGENT_ROOT/.hermes/honcho"
+  PROFILE="$AGENT_ROOT/.hermes/profiles/$SLUG"
   export WORKSPACE_CWD="$AGENT_ROOT/workspace"; LA="$TMP/LaunchAgents"; mkdir -p "$LA"; say "dry-run → $TMP"; fi
 
 # ---- 1. skeleton ------------------------------------------------------------
-say "1/8  directory skeleton"
+say "1/7  directory skeleton"
 mkdir -p "$PROFILE"/{cron,scripts,logs,memories,home/.gbrain} "$AGENT_ROOT/.hermes/sandbox" \
-  "$HONCHO_DIR"/{honcho,scripts,backups} "$AGENT_ROOT/.home/.gbrain" \
+  "$AGENT_ROOT/.home/.gbrain" \
   "$AGENT_ROOT"/{.cache,.npm,.ollama,tmp,workspace} \
   "$AGENT_ROOT/vault"/{research,assets,sources,logs,published} \
   "$AGENT_ROOT/vault/brain"/{people,projects,guides,tech,daily,companies,concepts,meetings,sources}
@@ -195,7 +186,7 @@ render "$REPO/templates/workspace.README.md.tmpl" > "$AGENT_ROOT/workspace/READM
 ok "tree under $AGENT_ROOT"
 
 # ---- 2. sandbox -------------------------------------------------------------
-say "2/8  sandbox"
+say "2/7  sandbox"
 render "$REPO/templates/sandbox.sb.template" > "$AGENT_ROOT/.hermes/sandbox/$SLUG.sb"
 if command -v sandbox-exec >/dev/null; then
   sandbox-exec -f "$AGENT_ROOT/.hermes/sandbox/$SLUG.sb" /usr/bin/true 2>/dev/null \
@@ -203,7 +194,7 @@ if command -v sandbox-exec >/dev/null; then
 else plan "sandbox-exec unavailable (non-macOS) — rendered but not compile-checked"; fi
 
 # ---- 3. profile -------------------------------------------------------------
-say "3/8  Hermes profile"
+say "3/7  Hermes profile"
 if [ -n "$REF_AGENT" ] && [ -d "$AGENTS_ROOT/$REF_AGENT" ]; then
   rs="$(printf '%s' "$REF_AGENT" | tr '[:upper:]' '[:lower:]')"
   sed -e "s|$AGENTS_ROOT/$REF_AGENT/|$AGENT_ROOT/|g" \
@@ -220,16 +211,6 @@ fi
 # blocks, preserving every other key. SuperHermes-owned helper (no Fleet dep).
 printf '%s\n' "$MODEL_BLOCK" | python3 "$REPO/bin/set-model-block" write "$PROFILE/config.yaml" || die "could not set model block"
 ok "model → ${MODEL_PROVIDER:-openai-codex}/${MODEL_NAME:-gpt-5.5}"
-cat > "$PROFILE/honcho.json" <<JSON
-{ "baseUrl": "http://127.0.0.1:$API_PORT", "enabled": true,
-  "hosts": { "hermes.$SLUG": { "enabled": true, "workspace": "$WORKSPACE",
-    "peerName": "operator", "aiPeer": "$AI_PEER", "pinPeerName": true,
-    "saveMessages": true, "writeFrequency": "async", "recallMode": "hybrid",
-    "dialecticReasoningLevel": "low", "dialecticDynamic": true,
-    "dialecticMaxChars": 800, "messageMaxChars": 20000,
-    "dialecticMaxInputChars": 8000, "contextTokens": 1200,
-    "observation": true } } }
-JSON
 cat > "$PROFILE/SOUL.md" <<SOUL
 # $NAME
 
@@ -260,10 +241,10 @@ render "$REPO/templates/git-sync.sh.tmpl" > "$PROFILE/scripts/git-sync.sh"; chmo
 python3 "$PROFILE/scripts/cron_registry_snapshot.py" || die "could not snapshot durable cron definitions"
 # normalised root .gitignore (default-deny; per-agent copy of the fleet standard)
 render "$REPO/templates/gitignore.tmpl" > "$AGENT_ROOT/.gitignore"
-ok "honcho.json + SOUL + MEMORY/USER + .env(secret keys) + cron(memory-maintenance + git-sync) + root .gitignore"
+ok "SOUL + MEMORY/USER + .env(secret keys) + cron(memory-maintenance + git-sync) + root .gitignore"
 
 # ---- 4. gbrain (profile-isolated v0.41; own runtime, no cross-agent dep) -----
-say "4/8  GBrain"
+say "4/7  GBrain"
 mkdir -p "$PROFILE/home/.gbrain" "$AGENT_ROOT/.local/bin"
 # canonical store at PROFILE-HOME (not .home); pglite engine; /v1 Ollama for embeddings
 cat > "$PROFILE/home/.gbrain/config.json" <<JSON
@@ -283,20 +264,8 @@ printf '# %s - GBrain\n\nKnowledge base index.\n' "$NAME" > "$AGENT_ROOT/vault/b
 python3 "$REPO/bin/ensure-gbrain-mcp" "$PROFILE/config.yaml" "$AGENT_ROOT" || true
 ok "gbrain config (profile-home pglite, /v1) + own wrapper + MCP block + vault/brain"
 
-# ---- 5. honcho stack (deprecated; skipped unless --with-honcho) -------------
-say "5/8  Honcho skip"
-if [ "$WITH_HONCHO" = 1 ]; then
-  render "$REPO/templates/honcho/docker-compose.yml.tmpl" > "$HONCHO_DIR/honcho/docker-compose.yml"
-  render "$REPO/templates/honcho/env.tmpl"                > "$HONCHO_DIR/honcho/.env"
-  render "$REPO/templates/honcho/backup.sh.tmpl" | sed "s|__HONCHO_DIR__|$HONCHO_DIR|g" > "$HONCHO_DIR/scripts/backup.sh"
-  chmod +x "$HONCHO_DIR/scripts/backup.sh"
-  ok "compose + .env + backup.sh ($PROJECT, ports $API_PORT/$DB_PORT/$REDIS_PORT)"
-else
-  ok "skipped — Honcho deprecated (pass --with-honcho only if you truly need it)"
-fi
-
-# ---- 6. launchd plists ------------------------------------------------------
-say "6/8  launchd plists"
+# ---- 5. launchd plists ------------------------------------------------------
+say "5/7  launchd plists"
 cat > "$LA/ai.hermes.gateway-$SLUG.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -320,24 +289,10 @@ cat > "$LA/ai.hermes.gateway-$SLUG.plist" <<PLIST
   <key>StandardErrorPath</key><string>$PROFILE/logs/gateway.error.log</string>
 </dict></plist>
 PLIST
-if [ "$WITH_HONCHO" = 1 ]; then
-cat > "$LA/ai.hermes.honcho.$SLUG.backup.plist" <<PLIST
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-  <key>Label</key><string>ai.hermes.honcho.$SLUG.backup</string>
-  <key>ProgramArguments</key><array><string>$HONCHO_DIR/scripts/backup.sh</string></array>
-  <key>StartCalendarInterval</key><dict><key>Hour</key><integer>3</integer><key>Minute</key><integer>0</integer></dict>
-  <key>StandardOutPath</key><string>$HONCHO_DIR/backups/launchd.out.log</string>
-  <key>StandardErrorPath</key><string>$HONCHO_DIR/backups/launchd.err.log</string>
-  <key>WorkingDirectory</key><string>$HONCHO_DIR</string>
-</dict></plist>
-PLIST
-fi
 if command -v plutil >/dev/null; then plutil -lint "$LA/ai.hermes.gateway-$SLUG.plist" >/dev/null && ok "gateway plist (lint clean)"; else ok "gateway plist written"; fi
 
 # ---- 7. perms + git ---------------------------------------------------------
-say "7/8  permissions + git"
+say "6/7  permissions + git"
 find "$AGENT_ROOT" -type d -exec chmod 750 {} + 2>/dev/null || true; ok "dirs 750"
 # initialise the agent's OWN git repo at its root. The normalised default-deny
 # .gitignore means only the durable identity is versioned — secrets, caches, the
@@ -351,21 +306,12 @@ if command -v git >/dev/null && [ ! -d "$AGENT_ROOT/.git" ]; then
 else plan "git unavailable or repo already exists — skipped init"; fi
 
 # ---- 8. services ------------------------------------------------------------
-say "8/8  services"
+say "7/7  services"
 if [ "$DRYRUN" = 1 ]; then
-  if [ "$WITH_HONCHO" = 1 ]; then
-    plan "clone Honcho + compose up + embeddings health-gate :$API_PORT"
-  else
-    plan "skip Honcho (deprecated)"
-  fi
   plan "install GBrain (profile-isolated) + import vault/brain + embed"
   plan "bootstrap gateway-$SLUG launchd and start gateway"
   say "DRY-RUN complete → $TMP"
 elif [ "$START" = "yes" ]; then
-  # Shared boot sequence — one copy in lib/boot-services.sh.
-  # SKIP_HONCHO defaults on; --with-honcho clears it for the rare opt-in path.
-  export SKIP_HONCHO=1
-  [ "$WITH_HONCHO" = 1 ] && export SKIP_HONCHO=0
   . "$REPO/lib/boot-services.sh" || die "could not source $REPO/lib/boot-services.sh"
   boot_agent_services || die "services boot failed (see above)"
   say "⚠ MANUAL: (1) secrets → $PROFILE/.env — Telegram token from @BotFather  (2) credentials → $PROFILE/auth.json  (3) write $PROFILE/SOUL.md"
