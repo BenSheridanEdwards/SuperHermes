@@ -47,7 +47,7 @@ sys.stdout.write(re.sub(r"__([A-Z_]+)__", lambda m: os.environ.get(m.group(1), m
 PY
 }
 
-NAME="" CAMP="" TIER="" START="yes" DRYRUN=0 YES=0
+NAME="" CAMP="" TIER="" START="yes" DRYRUN=0 YES=0 WITH_HONCHO=0
 MODEL_PROVIDER="" MODEL_NAME="" FB1_PROVIDER="" FB1_MODEL="" FB2_PROVIDER="" FB2_MODEL="" ROUNDROBIN=""
 while [ $# -gt 0 ]; do case "$1" in
   --name) NAME="${2:-}"; shift 2;; --camp) CAMP="${2:-}"; shift 2;; --tier) TIER="${2:-}"; shift 2;;
@@ -55,8 +55,9 @@ while [ $# -gt 0 ]; do case "$1" in
   --fallback) if [ -z "$FB1_PROVIDER" ]; then FB1_PROVIDER="${2%%:*}"; FB1_MODEL="${2#*:}"; else FB2_PROVIDER="${2%%:*}"; FB2_MODEL="${2#*:}"; fi; shift 2;;
   --round-robin) ROUNDROBIN="y"; shift;;
   --no-start) START="no"; shift;; --start) START="yes"; shift;; --dry-run) DRYRUN=1; shift;;
+  --with-honcho) WITH_HONCHO=1; shift;; --no-honcho) WITH_HONCHO=0; shift;;
   --yes|-y) YES=1; shift;;
-  -h|--help) sed -n '2,22p' "$0"; exit 0;; *) die "unknown arg: $1";;
+  -h|--help) sed -n '2,25p' "$0"; exit 0;; *) die "unknown arg: $1";;
 esac; done
 
 ask(){ local __v="$1" __p="$2" __d="${3:-}" __r; [ -n "${!__v}" ] && return 0
@@ -282,13 +283,17 @@ printf '# %s - GBrain\n\nKnowledge base index.\n' "$NAME" > "$AGENT_ROOT/vault/b
 python3 "$REPO/bin/ensure-gbrain-mcp" "$PROFILE/config.yaml" "$AGENT_ROOT" || true
 ok "gbrain config (profile-home pglite, /v1) + own wrapper + MCP block + vault/brain"
 
-# ---- 5. honcho stack --------------------------------------------------------
-say "5/8  Honcho stack"
-render "$REPO/templates/honcho/docker-compose.yml.tmpl" > "$HONCHO_DIR/honcho/docker-compose.yml"
-render "$REPO/templates/honcho/env.tmpl"                > "$HONCHO_DIR/honcho/.env"
-render "$REPO/templates/honcho/backup.sh.tmpl" | sed "s|__HONCHO_DIR__|$HONCHO_DIR|g" > "$HONCHO_DIR/scripts/backup.sh"
-chmod +x "$HONCHO_DIR/scripts/backup.sh"
-ok "compose + .env + backup.sh ($PROJECT, ports $API_PORT/$DB_PORT/$REDIS_PORT)"
+# ---- 5. honcho stack (deprecated; skipped unless --with-honcho) -------------
+say "5/8  Honcho skip"
+if [ "$WITH_HONCHO" = 1 ]; then
+  render "$REPO/templates/honcho/docker-compose.yml.tmpl" > "$HONCHO_DIR/honcho/docker-compose.yml"
+  render "$REPO/templates/honcho/env.tmpl"                > "$HONCHO_DIR/honcho/.env"
+  render "$REPO/templates/honcho/backup.sh.tmpl" | sed "s|__HONCHO_DIR__|$HONCHO_DIR|g" > "$HONCHO_DIR/scripts/backup.sh"
+  chmod +x "$HONCHO_DIR/scripts/backup.sh"
+  ok "compose + .env + backup.sh ($PROJECT, ports $API_PORT/$DB_PORT/$REDIS_PORT)"
+else
+  ok "skipped — Honcho deprecated (pass --with-honcho only if you truly need it)"
+fi
 
 # ---- 6. launchd plists ------------------------------------------------------
 say "6/8  launchd plists"
@@ -315,6 +320,7 @@ cat > "$LA/ai.hermes.gateway-$SLUG.plist" <<PLIST
   <key>StandardErrorPath</key><string>$PROFILE/logs/gateway.error.log</string>
 </dict></plist>
 PLIST
+if [ "$WITH_HONCHO" = 1 ]; then
 cat > "$LA/ai.hermes.honcho.$SLUG.backup.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -327,14 +333,15 @@ cat > "$LA/ai.hermes.honcho.$SLUG.backup.plist" <<PLIST
   <key>WorkingDirectory</key><string>$HONCHO_DIR</string>
 </dict></plist>
 PLIST
-if command -v plutil >/dev/null; then plutil -lint "$LA/ai.hermes.gateway-$SLUG.plist" >/dev/null && ok "gateway + backup plists (lint clean)"; else ok "plists written"; fi
+fi
+if command -v plutil >/dev/null; then plutil -lint "$LA/ai.hermes.gateway-$SLUG.plist" >/dev/null && ok "gateway plist (lint clean)"; else ok "gateway plist written"; fi
 
 # ---- 7. perms + git ---------------------------------------------------------
 say "7/8  permissions + git"
 find "$AGENT_ROOT" -type d -exec chmod 750 {} + 2>/dev/null || true; ok "dirs 750"
 # initialise the agent's OWN git repo at its root. The normalised default-deny
 # .gitignore means only the durable identity is versioned — secrets, caches, the
-# Honcho stack, the GBrain store, the vault, and workspace clones stay out.
+# GBrain store, the vault, and workspace clones stay out.
 if command -v git >/dev/null && [ ! -d "$AGENT_ROOT/.git" ]; then
   git -C "$AGENT_ROOT" init -q
   git -C "$AGENT_ROOT" add -A
@@ -346,19 +353,22 @@ else plan "git unavailable or repo already exists — skipped init"; fi
 # ---- 8. services ------------------------------------------------------------
 say "8/8  services"
 if [ "$DRYRUN" = 1 ]; then
-  plan "clone Honcho, docker compose -p $PROJECT up -d --build, configure embeddings, health-gate :$API_PORT"
-  plan "install GBrain v0.41 (profile-isolated) + import vault/brain + embed"
-  plan "launchctl bootstrap gateway-$SLUG + honcho.$SLUG.backup; kickstart gateway"
+  if [ "$WITH_HONCHO" = 1 ]; then
+    plan "clone Honcho + compose up + embeddings health-gate :$API_PORT"
+  else
+    plan "skip Honcho (deprecated)"
+  fi
+  plan "install GBrain (profile-isolated) + import vault/brain + embed"
+  plan "bootstrap gateway-$SLUG launchd and start gateway"
   say "DRY-RUN complete → $TMP"
 elif [ "$START" = "yes" ]; then
-  # Shared boot sequence — one copy in lib/boot-services.sh (also used by
-  # Shared/Fleet/bin/boot-agent), so a fix to the boot path lands for both. It also
-  # carries the .env-perms + fleet-BWS-token fixes that a fresh gateway needs for a
-  # green day-one vault pull. Required env (NAME/SLUG/AGENT_ROOT/PROFILE/HONCHO_DIR/
-  # PROJECT/API_PORT/LA/AGENTS_ROOT/REPO) is set above.
+  # Shared boot sequence — one copy in lib/boot-services.sh.
+  # SKIP_HONCHO defaults on; --with-honcho clears it for the rare opt-in path.
+  export SKIP_HONCHO=1
+  [ "$WITH_HONCHO" = 1 ] && export SKIP_HONCHO=0
   . "$REPO/lib/boot-services.sh" || die "could not source $REPO/lib/boot-services.sh"
-  boot_agent_services || die "services boot failed (Docker/disk/Honcho preflight — see above)"
-  say "⚠ MANUAL: (1) secrets → $PROFILE/.env — Telegram token from @BotFather (or your secrets manager)  (2) credentials → $PROFILE/auth.json  (3) write $PROFILE/SOUL.md  (4) seed Honcho grounding for '$WORKSPACE'"
+  boot_agent_services || die "services boot failed (see above)"
+  say "⚠ MANUAL: (1) secrets → $PROFILE/.env — Telegram token from @BotFather  (2) credentials → $PROFILE/auth.json  (3) write $PROFILE/SOUL.md"
 else ok "scaffold complete (--no-start)."; fi
 
 echo; say "── $NAME ready ($([ "$DRYRUN" = 1 ] && echo dry-run || echo live)) ──"

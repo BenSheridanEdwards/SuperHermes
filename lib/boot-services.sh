@@ -6,9 +6,9 @@
 # single copy means a fix to the boot path (e.g. the pgvector self-heal, the
 # .env perms, the BWS token) lands for both.
 #
-# Sequence: Docker/disk preflight → Honcho stack up → pgvector reshape (768) →
-# health gate → secret-file perms + fleet BWS token → GBrain install + seed →
-# launchd gateway → verify-fleet.
+# Sequence: optional Honcho (only when SKIP_HONCHO=0) → secret-file perms +
+# fleet BWS token → GBrain install + seed → launchd gateway → verify-fleet.
+# Honcho is deprecated fleet-wide. Callers should leave SKIP_HONCHO unset or 1.
 #
 # Required env (set by the caller before calling boot_agent_services):
 #   NAME SLUG AGENT_ROOT PROFILE HONCHO_DIR PROJECT API_PORT LA AGENTS_ROOT REPO
@@ -67,10 +67,15 @@ boot_agent_services() {
   ok "normalised scripts in sync with templates (git-sync.sh, memory_health_snapshot.py, cron_registry_snapshot.py)"
 
   say "services: preflight"
-  { command -v docker >/dev/null && docker info >/dev/null 2>&1; } || { warn "Docker not running — cannot boot services"; return 1; }
   local free_gb; free_gb="$(df -k "$AGENTS_ROOT" | tail -1 | awk '{printf "%d",$4/1024/1024}')"
   if [ "${free_gb:-0}" -lt "$DISK_FLOOR_GB" ]; then warn "disk below floor: ${free_gb}GB < ${DISK_FLOOR_GB}GB"; return 1; fi
-  ok "docker up · ${free_gb}GB free"
+  ok "disk · ${free_gb}GB free"
+
+  if [ "${SKIP_HONCHO:-1}" != "0" ]; then
+    ok "Honcho skipped (deprecated)"
+  else
+  { command -v docker >/dev/null && docker info >/dev/null 2>&1; } || { warn "Docker not running — cannot boot Honcho"; return 1; }
+  ok "docker up"
 
   say "services: honcho source"
   if [ -d "$compose_dir/.git" ] || [ -f "$compose_dir/pyproject.toml" ]; then
@@ -103,6 +108,7 @@ boot_agent_services() {
   local healthy=0
   for i in $(seq 1 30); do curl -fsS "http://127.0.0.1:$API_PORT/health" >/dev/null 2>&1 && { healthy=1; break; }; sleep 2; done
   [ "$healthy" = 1 ] && ok "honcho api healthy ($API_PORT)" || warn "honcho api not healthy yet"
+  fi
 
   say "services: secret perms + fleet token"
   chmod 600 "$PROFILE/.env" 2>/dev/null || true
@@ -131,8 +137,15 @@ boot_agent_services() {
 
   say "services: launchd + verify"
   launchctl bootstrap "gui/$(id -u)" "$LA/ai.hermes.gateway-$SLUG.plist" 2>/dev/null || true
-  launchctl bootstrap "gui/$(id -u)" "$LA/ai.hermes.honcho.$SLUG.backup.plist" 2>/dev/null || true
-  launchctl kickstart -k "gui/$(id -u)/ai.hermes.gateway-$SLUG" 2>/dev/null || true
+  if [ "${SKIP_HONCHO:-1}" = "0" ]; then
+    launchctl bootstrap "gui/$(id -u)" "$LA/ai.hermes.honcho.$SLUG.backup.plist" 2>/dev/null || true
+  fi
+  # shellcheck disable=SC2034
+  # Start gateway via launchctl (label ai.hermes.gateway-$SLUG). Use kickstart -k from host shell.
+  launchctl enable "gui/$(id -u)/ai.hermes.gateway-$SLUG" 2>/dev/null || true
+  launchctl start "gui/$(id -u)/ai.hermes.gateway-$SLUG" 2>/dev/null \
+    || launchctl kickstart -k "gui/$(id -u)/ai.hermes.gateway-$SLUG" 2>/dev/null \
+    || true
   ok "gateway booted"
   if python3 "$REPO/bin/verify-fleet" --agent "$NAME" --quiet 2>/dev/null; then
     ok "verify-fleet: $NAME invariants pass"
