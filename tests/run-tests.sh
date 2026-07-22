@@ -109,6 +109,52 @@ python3 -m json.tool "$REPO/templates/agent-template.json" >/dev/null 2>&1 \
   && ok "agent template manifest parses" || bad "agent template manifest parses"
 AGENTS_ROOT=""; [ -f "$REPO/superhermes.conf" ] && . "$REPO/superhermes.conf" || . "$REPO/superhermes.conf.example"
 [ -d "${AGENTS_ROOT:-/nonexistent}/TestUnit" ] && bad "dry-run left a real agent dir!" || ok "dry-run leaves no real agent dir"
+# GBrain at birth is Postgres fleet standard (never PGLite / never :11434).
+gcfg="$(cat "$td/TestUnit/.hermes/profiles/testunit/home/.gbrain/config.json" 2>/dev/null)"
+assert_has   "$gcfg" '"engine": "postgres"'              "gbrain config engine is postgres"
+assert_has   "$gcfg" 'postgres://gbrain_testunit@'       "gbrain config database_url uses gbrain_<slug>"
+assert_has   "$gcfg" 'localhost:11534/v1'                "gbrain config embed URL is fleet :11534"
+assert_has   "$gcfg" 'gbrain-base-v2'                    "gbrain config sets schema_pack"
+assert_hasnt "$gcfg" 'pglite'                            "gbrain config has no pglite"
+assert_hasnt "$gcfg" '11434'                             "gbrain config does not use :11434"
+wrap="$(cat "$td/TestUnit/.local/bin/gbrain" 2>/dev/null)"
+assert_has   "$wrap" '11534/v1'                          "gbrain wrapper defaults OLLAMA to :11534"
+assert_hasnt "$wrap" '11434'                             "gbrain wrapper does not default :11434"
+mcg="$(python3 - "$td/TestUnit/.hermes/profiles/testunit/config.yaml" <<'PY'
+import sys
+text = open(sys.argv[1]).read().splitlines()
+out = []
+grab = False
+for line in text:
+    if line.rstrip() == "  gbrain:":
+        grab = True
+        out.append(line)
+        continue
+    if grab:
+        if line.startswith("    "):
+            out.append(line)
+        else:
+            break
+print("\n".join(out))
+PY
+)"
+assert_has "$mcg" "args:" "gbrain MCP has args"
+assert_has "$mcg" "- serve" "gbrain MCP serves"
+assert_has "$mcg" "enabled: true" "gbrain MCP enabled"
+assert_has "$mcg" "HOME:" "gbrain MCP pins HOME"
+assert_has "$mcg" "HERMES_HOME:" "gbrain MCP pins HERMES_HOME"
+
+# ---------------------------------------------------------------------------
+section "ensure-gbrain-postgres — config-only writes fleet shape"
+T="$(mktemp -d)"
+python3 "$REPO/bin/ensure-gbrain-postgres" --slug probeagent --agent-root "$T/Probe" \
+  --profile-home "$T/Probe/.hermes/profiles/probeagent/home" --config-only >/dev/null
+gcfg="$(cat "$T/Probe/.hermes/profiles/probeagent/home/.gbrain/config.json")"
+assert_has "$gcfg" '"engine": "postgres"' "ensure-gbrain-postgres writes postgres engine"
+assert_has "$gcfg" 'gbrain_probeagent' "ensure-gbrain-postgres db id is gbrain_<slug>"
+assert_has "$gcfg" '11534/v1' "ensure-gbrain-postgres embed :11534"
+assert_hasnt "$gcfg" 'pglite' "ensure-gbrain-postgres never pglite"
+rm -rf "$T"
 
 # ---------------------------------------------------------------------------
 section "set-model-block — read round-trips; write replaces ONLY the model section"

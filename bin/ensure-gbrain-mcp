@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 # ============================================================================
 # ensure-gbrain-mcp — idempotently guarantee an agent's config.yaml has a
-# correct mcp_servers.gbrain block: own wrapper + `serve` + enabled: true.
+# correct mcp_servers.gbrain block: own wrapper + `serve` + enabled: true +
+# HOME/HERMES_HOME env pins (so the MCP child resolves the profile store).
 #
 # Why this exists: new-agent's clone path only *rewrote* an existing
 # `command: .../gbrain` via sed — so cloning an agent that lacked the block (or
@@ -11,23 +12,35 @@
 #
 # Idempotent: a config that is already correct is left byte-for-byte unchanged.
 #
-# Usage:  ensure-gbrain-mcp <config.yaml> <agent_root>
+# Usage:  ensure-gbrain-mcp <config.yaml> <agent_root> [<profile_dir>]
 # Exit:   0 = already correct or fixed; 2 = usage error
 # ============================================================================
 import sys
 from pathlib import Path
 
 def main():
-    if len(sys.argv) != 3:
-        sys.exit("usage: ensure-gbrain-mcp <config.yaml> <agent_root>")
+    if len(sys.argv) not in (3, 4):
+        sys.exit("usage: ensure-gbrain-mcp <config.yaml> <agent_root> [<profile_dir>]")
     cfg = Path(sys.argv[1]); root = sys.argv[2].rstrip("/")
     wrapper = f"{root}/.local/bin/gbrain"
+    if len(sys.argv) == 4:
+        profile = Path(sys.argv[3]).expanduser().resolve()
+    else:
+        # Derive slug from agent folder name (PascalCase → lowercase).
+        slug = Path(root).name.lower()
+        profile = Path(root) / ".hermes" / "profiles" / slug
+    home = profile / "home"
     want = [
         "  gbrain:",
         f"    command: {wrapper}",
         "    args:",
         "    - serve",
         "    enabled: true",
+        "    env:",
+        f"      HOME: {home}",
+        f"      HERMES_HOME: {profile}",
+        "    timeout: 120",
+        "    connect_timeout: 60",
     ]
     lines = cfg.read_text().splitlines()
 
@@ -71,7 +84,7 @@ def main():
         return                                  # already perfect → no write
     lines[g_i:g_end] = want
     cfg.write_text("\n".join(lines) + "\n")
-    print(f"ensure-gbrain-mcp: normalized gbrain block (own wrapper + enabled) -> {cfg}")
+    print(f"ensure-gbrain-mcp: normalized gbrain block (own wrapper + env pins) -> {cfg}")
 
 if __name__ == "__main__":
     main()

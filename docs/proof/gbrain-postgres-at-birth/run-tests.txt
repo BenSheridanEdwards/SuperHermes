@@ -1,0 +1,146 @@
+
+[36m▸ gitignore.tmpl — default-deny scopes to identity only[0m
+    [32m✓[0m tracks .hermes/profiles/test/config.yaml
+    [32m✓[0m tracks .hermes/profiles/test/SOUL.md
+    [32m✓[0m tracks .hermes/profiles/test/honcho.json
+    [32m✓[0m tracks .hermes/profiles/test/memories/MEMORY.md
+    [32m✓[0m tracks .hermes/profiles/test/cron/jobs.definition.json
+    [32m✓[0m tracks .hermes/sandbox/test.sb
+    [32m✓[0m tracks README.md
+    [32m✓[0m excludes volatile cron runtime registry
+    [32m✓[0m excludes .env
+    [32m✓[0m excludes auth.json
+    [32m✓[0m excludes google_token.json
+    [32m✓[0m excludes vault/
+    [32m✓[0m excludes workspace/
+    [32m✓[0m excludes honcho/honcho
+    [32m✓[0m excludes .pglite
+    [32m✓[0m excludes skills/
+
+[36m▸ git-sync.sh — silent success, secret tripwire, no force-push[0m
+    [32m✓[0m rendered script never force-pushes
+    [32m✓[0m noop exits 0
+    [32m✓[0m noop is silent
+    [32m✓[0m old orphaned index.lock self-heals
+    [32m✓[0m lock heal is silent
+    [32m✓[0m old orphaned index.lock is removed
+    [32m✓[0m fresh orphaned index.lock self-heals (reboot regression)
+    [32m✓[0m fresh orphaned index.lock is removed
+    [32m✓[0m live-held index.lock is not removed
+    [32m✓[0m live-held index.lock remains for the owner
+    [32m✓[0m change exits 0
+    [32m✓[0m successful commit is silent
+    [32m✓[0m change creates exactly one commit
+    [32m✓[0m secret aborts with exit 2
+    [32m✓[0m secret abort is reported
+    [32m✓[0m secret abort creates no commit
+    [32m✓[0m secret abort resets the index
+
+[36m▸ new-agent --dry-run — renders the full anatomy, zero side effects[0m
+    [32m✓[0m dry-run exits 0
+    [32m✓[0m sandbox compiles
+    [32m✓[0m renders normalised root .gitignore
+    [32m✓[0m initialises git at root
+    [32m✓[0m renders memory-maintenance cron
+    [32m✓[0m completes cleanly
+    [32m✓[0m gateway plist uses shared launcher
+    [32m✓[0m gateway plist does not bypass shared launcher
+    [32m✓[0m gateway plist passes slug to launcher
+    [32m✓[0m new agents have a bounded model-turn budget
+    [32m✓[0m agent template manifest parses
+    [32m✓[0m dry-run leaves no real agent dir
+    [32m✓[0m gbrain config engine is postgres
+    [32m✓[0m gbrain config database_url uses gbrain_<slug>
+    [32m✓[0m gbrain config embed URL is fleet :11534
+    [32m✓[0m gbrain config sets schema_pack
+    [32m✓[0m gbrain config has no pglite
+    [32m✓[0m gbrain config does not use :11434
+    [32m✓[0m gbrain wrapper defaults OLLAMA to :11534
+    [32m✓[0m gbrain wrapper does not default :11434
+    [32m✓[0m gbrain MCP has args
+    [32m✓[0m gbrain MCP serves
+    [32m✓[0m gbrain MCP enabled
+    [32m✓[0m gbrain MCP pins HOME
+    [32m✓[0m gbrain MCP pins HERMES_HOME
+
+[36m▸ ensure-gbrain-postgres — config-only writes fleet shape[0m
+    [32m✓[0m ensure-gbrain-postgres writes postgres engine
+    [32m✓[0m ensure-gbrain-postgres db id is gbrain_<slug>
+    [32m✓[0m ensure-gbrain-postgres embed :11534
+    [32m✓[0m ensure-gbrain-postgres never pglite
+
+[36m▸ set-model-block — read round-trips; write replaces ONLY the model section[0m
+    [32m✓[0m write sets the new primary
+    [32m✓[0m write sets the fallback chain
+    [32m✓[0m write sets round-robin
+    [32m✓[0m write drops the old model
+    [32m✓[0m write preserves non-model keys
+    [32m✓[0m write preserves toolsets
+    [32m✓[0m read round-trips the model
+
+[36m▸ new-agent — model flags render the chosen primary + fallbacks + round-robin[0m
+    [32m✓[0m model dry-run exits 0
+    [32m✓[0m primary provider from --provider
+    [32m✓[0m primary model from --model
+    [32m✓[0m fallback #1 from --fallback
+    [32m✓[0m fallback #2 from --fallback
+    [32m✓[0m round-robin from --round-robin
+
+[36m▸ memory-health-snapshot.py.tmpl — parses + uses the OWN gbrain wrapper[0m
+    [32m✓[0m snapshot parses
+    [32m✓[0m snapshot uses own .local/bin/gbrain wrapper
+    [32m✓[0m snapshot does NOT use the shared wrapper
+
+[36m▸ cron registry snapshot — durable definitions exclude runtime state[0m
+    [32m✓[0m snapshot exits 0
+    [32m✓[0m snapshot is silent
+    [32m✓[0m snapshot keeps routine definition
+    [32m✓[0m snapshot keeps routine schedule
+    [32m✓[0m snapshot removes last_run_at
+    [32m✓[0m snapshot removes fire_claim
+    [32m✓[0m snapshot removes registry updated_at
+    [32m✓[0m snapshot removes repeat progress
+    [32m✓[0m missing runtime registry restores from durable definition
+    [32m✓[0m restored runtime registry keeps job definition
+    [32m✓[0m restored runtime registry starts without stale execution state
+    [32m✓[0m malformed registry fails closed
+    [32m✓[0m malformed registry preserves last good definition
+
+[36m▸ identity git-sync — scheduler metadata never dirties the identity repo[0m
+    [32m✓[0m metadata-only sync exits 0
+    [32m✓[0m metadata-only sync creates no commit
+    [32m✓[0m metadata-only scheduler write leaves repo clean
+    [32m✓[0m definition change sync exits 0
+    [32m✓[0m definition change creates one commit
+    [32m✓[0m definition change leaves repo clean
+    [32m✓[0m commit stores updated routine definition
+
+[36m▸ migrate-cron-registry-git — upgrades an existing agent without a roster[0m
+    [32m✓[0m migration exits 0
+    [32m✓[0m migration tracks durable definition
+    [32m✓[0m migration untracks live registry
+    [32m✓[0m migration updates gitignore
+    [32m✓[0m migration installs snapshot-aware git-sync
+    [32m✓[0m migration bounds existing agent model turns
+    [32m✓[0m migration scopes memory maintenance to the agent root
+    [32m✓[0m migration bounds memory maintenance model calls
+    [32m✓[0m migration installs executable snapshot helper
+    [32m✓[0m migrated git-sync commits the upgrade
+    [32m✓[0m migrated runtime metadata stays clean
+
+[36m▸ cron-jobs.json.tmpl — renders valid, maintenance is snapshot-fed, git-sync standalone[0m
+    [32m✓[0m renders exactly 2 jobs
+    [32m✓[0m maintenance = script(snapshot)+skill, LLM job
+    [32m✓[0m maintenance is restricted to its agent root and necessary toolsets
+    [32m✓[0m maintenance prompt carries explicit retrieval and model-call budgets
+    [32m✓[0m git-sync = standalone no_agent job
+
+[36m▸ boot-services — a restart re-renders stale normalised scripts (drift self-heal)[0m
+    [32m✓[0m boot re-renders stale git-sync.sh to match template
+    [32m✓[0m boot re-renders stale snapshot to match template
+    [32m✓[0m boot renders cron registry snapshot helper
+    [32m✓[0m boot creates durable cron definitions for existing agents
+    [32m✓[0m re-rendered git-sync.sh stays executable
+    [32m✓[0m missing template leaves the existing script untouched
+
+[36mSummary[0m  [32m120 pass[0m  [31m0 fail[0m
