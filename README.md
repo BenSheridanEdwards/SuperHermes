@@ -129,7 +129,7 @@ mode the fleet hit). Reload with `launchctl kickstart -k` (config change) or
   - **Runtime:** `github:garrytan/gbrain` v0.41.x, installed *profile-isolated*
     into the agent's own `<profile>/home/.bun` (not the npm `gbrain@1.3.1` — that's
     an unrelated GPU library).
-  - **Store:** pglite at `<profile>/home/.gbrain/brain.pglite` (768-dim
+  - **Store:** Postgres (`gbrain_<slug>`); older agents may still use pglite at `<profile>/home/.gbrain/brain.pglite` (768-dim
     `nomic-embed-text`). Never SQLite.
   - **Access:** the agent's **own** `<agent>/.local/bin/gbrain` wrapper (pins
     `HOME`/`HERMES_HOME`/`BUN_INSTALL` and `OLLAMA_BASE_URL=…:11434/v1`).
@@ -186,7 +186,7 @@ fleet centralising on BitWarden run the *same* framework, no fork.
 An agent is "ideal" only if **all** of these hold:
 
 1. **Independent** — no cross-agent dependency in runtime, memory, or wrappers.
-2. **Own GBrain runtime** (v0.41, profile-isolated), pglite store, own wrapper, all
+2. **Own GBrain runtime** (v0.41, profile-isolated), Postgres store, own wrapper, all
    paths converging on one brain.
 3. **Town-square sandbox** with the three carve-outs; no `WRITE_SAFE_ROOT`.
 4. **No secrets in the repo** — they live only in the gitignored profile `.env` /
@@ -225,7 +225,7 @@ The phases: directory skeleton → town-square sandbox (compile-checked) → Her
 profile (`config.yaml`, `honcho.json`, **SOUL seed**, MEMORY/USER, **`.env` secret
 keys**, **memory-maintenance + git-sync crons** (+ their scripts), **normalised root
 `.gitignore`**) → GBrain (own v0.41 runtime
-+ wrapper + pglite) → Honcho stack (compose + `.env` + backup, ports auto-allocated)
++ wrapper + Postgres) → Honcho stack (compose + `.env` + backup, ports auto-allocated)
 → launchd plists → **permissions + `git init`** (the agent's own repo at its root)
 → services (Honcho up, GBrain installed + vault imported + embedded, gateway started).
 
@@ -274,7 +274,7 @@ AGENTS_ROOT/<Name>/                    ← the agent's own git repo root
 │   │   ├── auth.json                 credentials (never committed)
 │   │   ├── cron/jobs.definition.json durable routine definitions (tracked)
 │   │   ├── cron/jobs.json            live scheduler state (ignored)
-│   │   ├── home/.gbrain/             canonical pglite store + config.json
+│   │   ├── home/.gbrain/             canonical Postgres store + config.json
 │   │   └── memories/{MEMORY,USER}.md bootstrap memory
 │   └── honcho/honcho/                Dockerized memory stack
 ├── .local/bin/gbrain                 own GBrain v0.41 wrapper

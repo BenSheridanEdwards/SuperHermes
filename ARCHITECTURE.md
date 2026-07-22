@@ -40,9 +40,9 @@ including legitimate work like maintaining the shared skills library or building
 apps — while adding no protection the OS sandbox doesn't already enforce. Friction
 with no upside.
 
-### 4. GBrain: one pglite store per agent, profile-isolated, own wrapper
+### 4. GBrain: one Postgres store per agent, profile-isolated, own wrapper
 **Decision.** Each agent installs its own GBrain runtime into its profile-home,
-keeps one pglite store, and points its `config.json`, MCP command, and CLI wrapper
+keeps one Postgres store, and points its `config.json`, MCP command, and CLI wrapper
 at that one store.
 
 **Why.** The SQLite + shared-wrapper era produced two failures at once: a
