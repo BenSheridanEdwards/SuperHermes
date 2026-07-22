@@ -155,6 +155,15 @@ assert_has "$gcfg" 'gbrain_probeagent' "ensure-gbrain-postgres db id is gbrain_<
 assert_has "$gcfg" '11534/v1' "ensure-gbrain-postgres embed :11534"
 assert_hasnt "$gcfg" 'pglite' "ensure-gbrain-postgres never pglite"
 rm -rf "$T"
+# Client-scoped identity must match Fleet gbrain_<client>_<slug>
+T="$(mktemp -d)"
+python3 "$REPO/bin/ensure-gbrain-postgres" --slug hunter --client-id jake \
+  --agent-root "$T/Clients/Jake/Hunter" \
+  --profile-home "$T/Clients/Jake/Hunter/.hermes/profiles/hunter/home" --config-only >/dev/null
+gcfg="$(cat "$T/Clients/Jake/Hunter/.hermes/profiles/hunter/home/.gbrain/config.json")"
+assert_has "$gcfg" 'gbrain_jake_hunter' "client gbrain identity is gbrain_<client>_<slug>"
+assert_hasnt "$gcfg" 'gbrain_hunter@' "client identity is not bare gbrain_<slug>"
+rm -rf "$T"
 
 # ---------------------------------------------------------------------------
 section "set-model-block — read round-trips; write replaces ONLY the model section"
