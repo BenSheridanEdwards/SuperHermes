@@ -127,7 +127,7 @@ suffix) · **tier** (`s`|`m`|`l` → Honcho dialectic level) · proceed confirm.
    gbrain → the agent's own `.local/bin/gbrain`), `honcho.json`, SOUL stub,
    MEMORY/USER, the two baseline crons (**memory-maintenance** and **identity
    git-sync**) + scripts, and the **normalised default-deny `.gitignore`**.
-4. **GBrain** — own profile-isolated **v0.41** runtime + wrapper + pglite
+4. **GBrain** — own profile-isolated **v0.41** runtime + wrapper + **Postgres**
    `config.json` (768-dim, `/v1` Ollama); vault skeleton (start phase installs +
    imports + embeds).
 5. **Honcho stack** — `docker-compose.yml` + `.env` + `backup.sh` with

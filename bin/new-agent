@@ -243,26 +243,28 @@ python3 "$PROFILE/scripts/cron_registry_snapshot.py" || die "could not snapshot 
 render "$REPO/templates/gitignore.tmpl" > "$AGENT_ROOT/.gitignore"
 ok "SOUL + MEMORY/USER + .env(secret keys) + cron(memory-maintenance + git-sync) + root .gitignore"
 
-# ---- 4. gbrain (profile-isolated v0.41; own runtime, no cross-agent dep) -----
+# ---- 4. gbrain (profile-isolated v0.41; Postgres fleet standard) ------------
 say "4/7  GBrain"
-mkdir -p "$PROFILE/home/.gbrain" "$AGENT_ROOT/.local/bin"
-# canonical store at PROFILE-HOME (not .home); pglite engine; /v1 Ollama for embeddings
-cat > "$PROFILE/home/.gbrain/config.json" <<JSON
-{ "engine": "pglite", "database_path": "$PROFILE/home/.gbrain/brain.pglite",
-  "source_path": "$AGENT_ROOT/vault/brain",
-  "embedding_model": "ollama:nomic-embed-text:latest", "embedding_dimensions": 768,
-  "embedding_base_url": "http://localhost:11434/v1" }
-JSON
+mkdir -p "$PROFILE/home/.gbrain" "$AGENT_ROOT/.local/bin" "$AGENT_ROOT/vault/brain"
+# Fleet standard: Postgres at birth (never PGLite). Embed on fleet Ollama :11534.
+# Dry-run writes config only; live scaffold also CREATE ROLE/DATABASE.
+if [ "$DRYRUN" = 1 ]; then
+  python3 "$REPO/bin/ensure-gbrain-postgres" \
+    --slug "$SLUG" --agent-root "$AGENT_ROOT" --profile-home "$PROFILE/home" \
+    --config-only
+else
+  python3 "$REPO/bin/ensure-gbrain-postgres" \
+    --slug "$SLUG" --agent-root "$AGENT_ROOT" --profile-home "$PROFILE/home" \
+    || die "gbrain postgres provision failed for $SLUG"
+fi
 # the agent's OWN wrapper — points only at its own profile-isolated runtime
 render "$REPO/templates/gbrain-wrapper.tmpl" > "$AGENT_ROOT/.local/bin/gbrain"
 chmod +x "$AGENT_ROOT/.local/bin/gbrain"
 printf '# %s - GBrain\n\nKnowledge base index.\n' "$NAME" > "$AGENT_ROOT/vault/brain/HOME.md"
 # Guarantee config.yaml carries the correct gbrain MCP block (own wrapper +
-# enabled) regardless of how it was built. The clone path used to only sed an
-# existing `command:`, so cloning an agent that lacked the block produced one
-# with no GBrain MCP — that is how Iris/Jarvis ended up unwired. Idempotent.
-python3 "$REPO/bin/ensure-gbrain-mcp" "$PROFILE/config.yaml" "$AGENT_ROOT" || true
-ok "gbrain config (profile-home pglite, /v1) + own wrapper + MCP block + vault/brain"
+# serve + enabled + HOME/HERMES_HOME). Idempotent.
+python3 "$REPO/bin/ensure-gbrain-mcp" "$PROFILE/config.yaml" "$AGENT_ROOT" "$PROFILE" || true
+ok "gbrain config (postgres + embed :11534) + own wrapper + MCP block + vault/brain"
 
 # ---- 5. launchd plists ------------------------------------------------------
 say "5/7  launchd plists"
