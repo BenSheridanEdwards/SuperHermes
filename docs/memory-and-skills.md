@@ -80,11 +80,11 @@ no cross-agent dependency.
   profile-home Bun (`bun add -g github:garrytan/gbrain` with `HOME=<profile>/home`,
   `BUN_INSTALL=<profile>/home/.bun`). **Not** npm `gbrain@1.3.1` (an unrelated GPU
   library).
-- **Store** — pglite at `<profile>/home/.gbrain/brain.pglite` (768-dim
+- **Store** — Postgres `postgres://gbrain_<slug>@localhost:5432/gbrain_<slug>` (768-dim
   `nomic-embed-text`). Never SQLite.
 - **Wrapper** — `<agent>/.local/bin/gbrain` pins `HERMES_HOME`, `HOME`,
   `BUN_INSTALL`, `XDG_CACHE_HOME`, and `OLLAMA_BASE_URL=http://127.0.0.1:11434/v1`.
-- **config.json** — `{ "engine": "pglite", "database_path": ".../brain.pglite",
+- **config.json** — `{ "engine": "postgres", "database_url": "postgres://gbrain_<slug>@localhost:5432/gbrain_<slug>",
   "embedding_base_url": ".../v1" }`.
 - **MCP** — `mcp_servers.gbrain.command` → the agent's own wrapper, never a shared one.
 - **Seed** — `gbrain import <agent>/vault/brain` then `gbrain embed --stale`.
