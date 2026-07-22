@@ -248,14 +248,39 @@ say "4/7  GBrain"
 mkdir -p "$PROFILE/home/.gbrain" "$AGENT_ROOT/.local/bin" "$AGENT_ROOT/vault/brain"
 # Fleet standard: Postgres at birth (never PGLite). Embed on fleet Ollama :11534.
 # Dry-run writes config only; live scaffold also CREATE ROLE/DATABASE.
+# Client trees live under .../Clients/<client>/<Name>. Match Fleet identity
+# gbrain_<client>_<slug> so pointers and runtime contract never disagree.
+# (bash 3.2 + set -u: never expand an empty array.)
+GBRAIN_CLIENT_ID=""
+case "$AGENT_ROOT" in
+  */Clients/*/*)
+    _client_id="$(basename "$(dirname "$AGENT_ROOT")")"
+    _client_id="$(printf '%s' "$_client_id" | tr '[:upper:]' '[:lower:]')"
+    if [[ "$_client_id" =~ ^[a-z][a-z0-9_-]*$ ]]; then
+      GBRAIN_CLIENT_ID="$_client_id"
+    fi
+    ;;
+esac
 if [ "$DRYRUN" = 1 ]; then
-  python3 "$REPO/bin/ensure-gbrain-postgres" \
-    --slug "$SLUG" --agent-root "$AGENT_ROOT" --profile-home "$PROFILE/home" \
-    --config-only
+  if [ -n "$GBRAIN_CLIENT_ID" ]; then
+    python3 "$REPO/bin/ensure-gbrain-postgres" \
+      --slug "$SLUG" --client-id "$GBRAIN_CLIENT_ID" \
+      --agent-root "$AGENT_ROOT" --profile-home "$PROFILE/home" --config-only
+  else
+    python3 "$REPO/bin/ensure-gbrain-postgres" \
+      --slug "$SLUG" --agent-root "$AGENT_ROOT" --profile-home "$PROFILE/home" --config-only
+  fi
 else
-  python3 "$REPO/bin/ensure-gbrain-postgres" \
-    --slug "$SLUG" --agent-root "$AGENT_ROOT" --profile-home "$PROFILE/home" \
-    || die "gbrain postgres provision failed for $SLUG"
+  if [ -n "$GBRAIN_CLIENT_ID" ]; then
+    python3 "$REPO/bin/ensure-gbrain-postgres" \
+      --slug "$SLUG" --client-id "$GBRAIN_CLIENT_ID" \
+      --agent-root "$AGENT_ROOT" --profile-home "$PROFILE/home" \
+      || die "gbrain postgres provision failed for $SLUG"
+  else
+    python3 "$REPO/bin/ensure-gbrain-postgres" \
+      --slug "$SLUG" --agent-root "$AGENT_ROOT" --profile-home "$PROFILE/home" \
+      || die "gbrain postgres provision failed for $SLUG"
+  fi
 fi
 # the agent's OWN wrapper — points only at its own profile-isolated runtime
 render "$REPO/templates/gbrain-wrapper.tmpl" > "$AGENT_ROOT/.local/bin/gbrain"
