@@ -77,6 +77,19 @@ rm -f .git/index.lock
 echo b >> f; n0=$(git rev-list --count HEAD); out="$(run)"; rc=$?; n1=$(git rev-list --count HEAD)
 assert_eq "$rc" "0" "change exits 0"; assert_eq "$out" "" "successful commit is silent"
 assert_eq "$n1" "$((n0+1))" "change creates exactly one commit"
+# An arbitrary future agent with a configured remote must still fail closed:
+# unattended/default runs commit locally, report approval is needed, and never
+# contact or advance the remote.
+git init --bare -q "$T/remote.git"
+git remote add origin "$T/remote.git"
+git push -q -u origin HEAD:main
+remote0="$(git --git-dir="$T/remote.git" rev-parse refs/heads/main)"
+echo c >> f; n0=$(git rev-list --count HEAD); out="$(run)"; rc=$?; n1=$(git rev-list --count HEAD)
+remote1="$(git --git-dir="$T/remote.git" rev-parse refs/heads/main)"
+assert_eq "$rc" "0" "default remote sync exits 0 while push awaits approval"
+assert_has "$out" "push withheld pending approval" "default remote sync names the approval gate"
+assert_eq "$n1" "$((n0+1))" "default remote sync commits locally exactly once"
+assert_eq "$remote1" "$remote0" "default remote sync never advances the remote"
 printf 'tok=ghp_%s\n' "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789" >> f
 n0=$(git rev-list --count HEAD); out="$(run)"; rc=$?; n1=$(git rev-list --count HEAD)
 assert_eq "$rc" "2" "secret aborts with exit 2"
