@@ -201,7 +201,7 @@ if [ -n "$REF_AGENT" ] && [ -d "$AGENTS_ROOT/$REF_AGENT" ]; then
       -e "s|command: .*/gbrain|command: $AGENT_ROOT/.local/bin/gbrain|" \
       -e "s|^TELEGRAM_HOME_CHANNEL:.*|TELEGRAM_HOME_CHANNEL: ''|" \
       "$AGENTS_ROOT/$REF_AGENT/.hermes/profiles/$rs/config.yaml" > "$PROFILE/config.yaml"
-  ok "config.yaml (cloned from $REF_AGENT, repointed, telegram cleared)"
+  ok "config.yaml (cloned from $REF_AGENT, repointed, paths repointed; telegram still from ref until force-disable)"
 else
   render "$REPO/templates/config.yaml.tmpl" > "$PROFILE/config.yaml"
   ok "config.yaml (bundled generic template)"
@@ -211,6 +211,44 @@ fi
 # blocks, preserving every other key. SuperHermes-owned helper (no Fleet dep).
 printf '%s\n' "$MODEL_BLOCK" | python3 "$REPO/bin/set-model-block" write "$PROFILE/config.yaml" || die "could not set model block"
 ok "model → ${MODEL_PROVIDER:-openai-codex}/${MODEL_NAME:-gpt-5.5}"
+# Named agents clone a Telegram-enabled reference (Neo). Gateway hard-fails
+# startup when telegram.enabled and no bot token (Reflect E2E 2026-07-25).
+# Leave messaging OFF until BotFather token is vault-wired; operators enable later.
+python3 - "$PROFILE/config.yaml" <<'PYTG' || die "could not disable telegram until token"
+import re, sys
+from pathlib import Path
+p = Path(sys.argv[1])
+text = p.read_text()
+lines = text.splitlines()
+out = []
+in_tg = False
+seen = False
+for line in lines:
+    if re.match(r"^telegram:\s*$", line):
+        in_tg = True
+        seen = True
+        out.append(line)
+        continue
+    if in_tg:
+        if line and not line[0].isspace():
+            in_tg = False
+        elif re.match(r"^(\s+)enabled:\s*\S+", line):
+            indent = re.match(r"^(\s+)", line).group(1)
+            out.append(f"{indent}enabled: false")
+            in_tg = False
+            continue
+    out.append(line)
+if not seen:
+    # no top-level telegram block — append disabled stub after model is fine
+    out.append("telegram:")
+    out.append("  enabled: false")
+text2 = "\n".join(out)
+if not text2.endswith("\n"):
+    text2 += "\n"
+p.write_text(text2)
+print("telegram.enabled=false (until bot token)")
+PYTG
+ok "telegram disabled until bot token (gateway will not hard-fail on missing token)"
 cat > "$PROFILE/SOUL.md" <<SOUL
 # $NAME
 
