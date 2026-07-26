@@ -108,13 +108,14 @@ anatomy above — correct from day one.
 
 ```sh
 bin/new-agent                                  # fully interactive
-bin/new-agent --name Sky --camp codewalnut --tier m
+bin/new-agent --name Sky --camp codewalnut
 bin/new-agent --name Sky --no-start            # scaffold files only
 bin/new-agent --name Sky --dry-run             # render to temp, zero side effects
 ```
 
 Prompts: **name** (PascalCase) · **camp** (`personal`|`codewalnut` → workspace
-suffix) · **tier** (`s`|`m`|`l` → Honcho dialectic level) · proceed confirm.
+suffix) · **model** (primary provider/model, up to two fallbacks, round-robin) ·
+proceed confirm.
 
 **The 8 phases**
 
