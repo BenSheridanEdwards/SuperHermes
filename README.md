@@ -11,7 +11,7 @@ GBrain), a hardened "town-square" sandbox, and a launchd-managed gateway — and
 
 ```sh
 cp superhermes.conf.example superhermes.conf   # set AGENTS_ROOT + carve-outs
-bin/new-agent --name Sky --camp personal --tier m
+bin/new-agent --name Sky --camp personal
 ```
 
 > This README is the source of truth for *how* an ideal agent is built. The
@@ -207,7 +207,7 @@ An agent is "ideal" only if **all** of these hold:
 ## Build it
 
 ```sh
-bin/new-agent --name Sky --camp personal --tier m   # interactive: name · camp · tier · model
+bin/new-agent --name Sky --camp personal        # interactive: name · camp · model
 bin/new-agent --name Sky --dry-run                  # render to a temp dir, zero side effects
 bin/new-agent --name Sky --no-start                 # scaffold files only
 bin/new-agent --name Sky --provider xai-oauth --model grok-4.3 \

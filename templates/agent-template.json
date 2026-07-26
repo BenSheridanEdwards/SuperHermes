@@ -4,7 +4,7 @@
   "summary": "One isolated Hermes agent with durable identity, private runtime, and a separate knowledge vault.",
   "command": {
     "program": "Shared/SuperHermes/bin/new-agent",
-    "args": ["--name", "<Name>", "--camp", "<camp>", "--tier", "<s|m|l>"],
+    "args": ["--name", "<Name>", "--camp", "<camp>"],
     "dry_run_args": ["--dry-run"],
     "no_start_args": ["--no-start"]
   },

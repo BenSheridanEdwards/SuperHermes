@@ -41,7 +41,7 @@ build. (`bash "$REPO/tests/run-tests.sh"` also exercises the shipping scripts.)
 
 ## 3. Build
 ```sh
-"$REPO/bin/new-agent" --name <Name> --camp <camp> --tier <s|m|l>   # interactive: name·camp·tier
+"$REPO/bin/new-agent" --name <Name> --camp <camp>   # interactive: name·camp
 # --no-start  → scaffold files only (no Docker/launchd)
 ```
 The 8 phases: skeleton → town-square **sandbox** (compile-checked) → Hermes

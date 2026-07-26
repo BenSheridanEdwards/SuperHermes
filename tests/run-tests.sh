@@ -87,7 +87,7 @@ cd "$REPO"; rm -rf "$T"
 
 # ---------------------------------------------------------------------------
 section "new-agent --dry-run — renders the full anatomy, zero side effects"
-out="$(bash "$REPO/bin/new-agent" --name TestUnit --camp test --tier m --dry-run 2>&1)"; rc=$?
+out="$(bash "$REPO/bin/new-agent" --name TestUnit --camp test --dry-run 2>&1)"; rc=$?
 assert_eq "$rc" "0" "dry-run exits 0"
 assert_has "$out" "testunit.sb (compiles)"  "sandbox compiles"
 assert_has "$out" "root .gitignore"          "renders normalised root .gitignore"
@@ -184,7 +184,7 @@ rm -rf "$T"
 
 # ---------------------------------------------------------------------------
 section "new-agent — model flags render the chosen primary + fallbacks + round-robin"
-out="$(bash "$REPO/bin/new-agent" --name TestModel --camp test --tier m --dry-run \
+out="$(bash "$REPO/bin/new-agent" --name TestModel --camp test --dry-run \
   --provider anthropic --model claude-x --fallback xai-oauth:grok-4.3 --fallback opencode-go:kimi-k2-6 --round-robin 2>&1)"; rc=$?
 assert_eq "$rc" "0" "model dry-run exits 0"
 td="$(printf '%s' "$out" | python3 -c "import sys,re;t=re.sub(r'\x1b\[[0-9;]*m','',sys.stdin.read());m=re.search(r'dry-run . (\S+)',t);print(m.group(1) if m else '')")"
