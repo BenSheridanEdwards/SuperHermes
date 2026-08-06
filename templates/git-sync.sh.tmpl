@@ -6,15 +6,17 @@
 # The default-deny .gitignore guarantees ONLY identity files can ever be staged
 # (config, soul, memory, crons, scripts, sandbox, README) — never secrets,
 # caches, the Honcho stack, the GBrain store, the vault, or workspace clones.
-# So this stays tiny: stage-all, secret-tripwire, commit, then hold any
-# GitHub push for explicit approval.
+# So this stays tiny: stage-all, secret-tripwire, commit, then push to the
+# private identity remote (default on; set AGENT_GIT_SYNC_PUSH_APPROVED=0 to
+# withhold).
 #
 # Properties:
 #   • Idempotent — no diff → no commit, no noise.
-#   • Safe in unattended cron — NEVER pushes to GitHub by default. Set
-#     AGENT_GIT_SYNC_PUSH_APPROVED=1 only from a Chief-approved/manual run to
-#     push. It never force-pushes.
+#   • Safe in unattended cron — pushes to the private identity remote by default
+#     (AGENT_GIT_SYNC_PUSH_APPROVED defaults to 1). Set =0 to withhold. Never force-pushes.
 #   • Fails closed on a suspected secret pasted into a tracked file.
+#   • Never bare `git push` first — on non-interactive macOS that hangs on the
+#     credential helper (scar 2026-08-06). Always GH_TOKEN / BWS header auth.
 #
 # OUTPUT CONTRACT (runs as a no_agent cron job → stdout is delivered verbatim to
 # the human, empty stdout = silent). So this stays SILENT on success / no-op and
@@ -27,6 +29,29 @@
 #   agent: __AGENT_NAME__ (slug __AGENT_SLUG__)
 # ============================================================================
 set -euo pipefail
+
+# Unattended cron must never invoke an interactive credential helper. Disable
+# prompts and inherited helpers so missing auth fails fast instead of hanging.
+export GIT_TERMINAL_PROMPT=0
+export GIT_ASKPASS=/usr/bin/false
+export SSH_ASKPASS=/usr/bin/false
+export GIT_CONFIG_COUNT=1
+export GIT_CONFIG_KEY_0=credential.helper
+export GIT_CONFIG_VALUE_0=
+
+# Fleet vault env for non-interactive HTTPS push (BWS_ACCESS_TOKEN / BWS_SERVER_URL)
+if [ -f /Users/agents/Agents/.fleet.env ]; then
+  set -a
+  # shellcheck disable=SC1091
+  . /Users/agents/Agents/.fleet.env
+  set +a
+fi
+if [ -f /Users/agents/Agents/.fleet.config.env ]; then
+  set -a
+  # shellcheck disable=SC1091
+  . /Users/agents/Agents/.fleet.config.env
+  set +a
+fi
 
 ROOT="${AGENT_GIT_ROOT:-__AGENT_ROOT__}"
 NAME="__AGENT_NAME__"
@@ -62,15 +87,69 @@ fi
 
 push_if_approved() {
   git remote get-url origin >/dev/null 2>&1 || return 0
-  if [ "${AGENT_GIT_SYNC_PUSH_APPROVED:-0}" != "1" ]; then
+  if [ "${AGENT_GIT_SYNC_PUSH_APPROVED:-1}" != "1" ]; then
     echo "$NAME git-sync: committed locally; GitHub push withheld pending approval - run: AGENT_GIT_SYNC_PUSH_APPROVED=1 $0"
     return 0
   fi
-  if ! git push -q origin "$BRANCH" 2>/dev/null; then
-    git fetch -q origin "$BRANCH" 2>/dev/null || true
-    if ! { git rebase -q "origin/$BRANCH" 2>/dev/null && git push -q origin "$BRANCH" 2>/dev/null; }; then
+
+  # Non-interactive macOS: bare git push often HANGS on credential helper (scar 2026-08-06).
+  # Always authenticate via GH_TOKEN env or BWS secret; never bare-push first.
+  _git_auth_header() {
+    local token=""
+    token="${GH_TOKEN:-${GITHUB_TOKEN:-}}"
+    if [ -z "$token" ] && [ -x /Users/agents/.hermes/bin/bws ]; then
+      set +e
+      token=$(
+        BWS_SERVER_URL="${BWS_SERVER_URL:-https://vault.bitwarden.eu}" \
+        /Users/agents/.hermes/bin/bws secret list --output json 2>/dev/null \
+        | python3 -c '
+import json,sys,os,subprocess
+try:
+  data=json.load(sys.stdin)
+except Exception:
+  sys.exit(1)
+hit=next((s for s in data if (s.get("key") or s.get("name")) in ("GH_TOKEN","GITHUB_TOKEN")), None)
+if not hit: sys.exit(2)
+env=os.environ.copy()
+env["BWS_SERVER_URL"]=os.environ.get("BWS_SERVER_URL","https://vault.bitwarden.eu")
+obj=json.loads(subprocess.check_output(["/Users/agents/.hermes/bin/bws","secret","get",hit["id"],"--output","json"], env=env))
+v=(obj.get("value") or "").strip()
+if not v: sys.exit(3)
+print(v)
+' 2>/dev/null
+      )
+      set -e
+    fi
+    if [ -z "$token" ]; then
+      return 1
+    fi
+    printf 'x-access-token:%s' "$token" | base64 | tr -d '\n'
+  }
+
+  _git_push_https() {
+    local auth_b64
+    auth_b64=$(_git_auth_header) || return 1
+    [ -n "$auth_b64" ] || return 1
+    git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${auth_b64}" push -q origin "$BRANCH"
+  }
+
+  _git_fetch_https() {
+    local auth_b64
+    auth_b64=$(_git_auth_header) || return 1
+    [ -n "$auth_b64" ] || return 1
+    git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${auth_b64}" fetch -q origin "$BRANCH"
+  }
+
+  if ! _git_push_https; then
+    _git_fetch_https 2>/dev/null || true
+    if git rebase -q "origin/$BRANCH" 2>/dev/null; then
+      if ! _git_push_https; then
+        git rebase --abort 2>/dev/null || true
+        echo "$NAME git-sync: committed locally but PUSH FAILED - resolve: git -C $ROOT push origin $BRANCH (HTTPS needs GH_TOKEN from BWS)"
+      fi
+    else
       git rebase --abort 2>/dev/null || true
-      echo "$NAME git-sync: committed locally but PUSH FAILED - resolve: git -C $ROOT push origin $BRANCH"
+      echo "$NAME git-sync: committed locally but PUSH FAILED - resolve: git -C $ROOT push origin $BRANCH (HTTPS needs GH_TOKEN from BWS)"
     fi
   fi
 }
@@ -80,7 +159,7 @@ git add -A
 # No changes -> silent success, unless a manual approved run is flushing
 # previously committed local backups to GitHub.
 if git diff --cached --quiet; then
-  if [ "${AGENT_GIT_SYNC_PUSH_APPROVED:-0}" = "1" ]; then
+  if [ "${AGENT_GIT_SYNC_PUSH_APPROVED:-1}" = "1" ]; then
     push_if_approved
   fi
   exit 0

@@ -54,6 +54,14 @@ section "git-sync.sh — silent success, secret tripwire, no force-push"
 T="$(mktemp -d)"; cd "$T"
 A_ROOT="$T/repo" A_SLUG=test A_NAME=Test render "$REPO/templates/git-sync.sh.tmpl" > sync.sh; chmod +x sync.sh
 if grep -qE 'push .*(--force|-f)\b' sync.sh; then bad "rendered script never force-pushes"; else ok "rendered script never force-pushes"; fi
+# Scar 2026-08-06: bare git push hangs non-interactively — template must BWS-header push only.
+if grep -qE 'if (! )?git push -q origin' sync.sh; then bad "rendered script never bare-pushes first"; else ok "rendered script never bare-pushes first"; fi
+assert_has "$(cat sync.sh)" 'extraheader=AUTHORIZATION' "rendered script uses HTTPS auth header push"
+assert_has "$(cat sync.sh)" '/Users/agents/.hermes/bin/bws' "rendered script can pull GH_TOKEN from BWS"
+assert_has "$(cat sync.sh)" 'AGENT_GIT_SYNC_PUSH_APPROVED:-1' "standing cron defaults to push on"
+assert_hasnt "$(cat sync.sh)" 'AGENT_GIT_SYNC_PUSH_APPROVED:-0' "template no longer defaults push off"
+assert_has "$(cat sync.sh)" '.fleet.env' "rendered script sources fleet BWS env"
+if bash -n sync.sh; then ok "rendered script bash -n clean"; else bad "rendered script bash -n clean"; fi
 mkdir repo; cd repo; git init -q; echo a > f; git add -A; git -c user.name=t -c user.email=t@t commit -qm init
 run(){ AGENT_GIT_ROOT="$T/repo" bash "$T/sync.sh" 2>&1; }
 out="$(run)"; rc=$?; assert_eq "$rc" "0" "noop exits 0"; assert_eq "$out" "" "noop is silent"
