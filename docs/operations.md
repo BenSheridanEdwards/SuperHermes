@@ -30,9 +30,10 @@ forbidden actions, output format, verification requirements.
 **Verification.** Don't assume a cron works because it exists — verify job status,
 schedule, workdir, scripts, last-run output, and side effects.
 
-Every agent ships with two baseline crons: the daily **memory-maintenance** run and
-the deterministic **identity git-sync** (see
-[memory-and-skills.md](memory-and-skills.md#layer-4--maintenance-consolidation--hygiene)).
+Every agent ships with two baseline crons: the daily **memory-maintenance** run
+(a snapshot-fed GBrain pass — vault import + embed, consolidation into topical
+pages, and hygiene over the bootstrap + GBrain layers) and the deterministic
+**identity git-sync**.
 
 ---
 
