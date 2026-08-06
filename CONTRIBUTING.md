@@ -53,7 +53,7 @@ Out of scope: anything that hardcodes a specific fleet, agent, or operator.
 
 ## Reporting issues
 
-Open a GitHub issue with your OS, Docker version, and the output of a
+Open a GitHub issue with your OS and the output of a
 `--dry-run` reproduction where possible.
 
 ## Licensing of contributions

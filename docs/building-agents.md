@@ -117,36 +117,29 @@ Prompts: **name** (PascalCase) · **camp** (`personal`|`codewalnut` → workspac
 suffix) · **model** (primary provider/model, up to two fallbacks, round-robin) ·
 proceed confirm.
 
-**The 8 phases**
+**The 6 phases**
 
-1. **Directory skeleton** — profile, sandbox, honcho, `.home`/`.gbrain`, caches,
+1. **Directory skeleton** — profile, sandbox, `.home`/`.gbrain`, caches,
    `vault/brain`.
 2. **Sandbox** — rendered from `templates/sandbox.sb.template` (town-square model),
    compile-checked.
 3. **Hermes profile** — `config.yaml` (bundled generic template, or cloned from
    `REF_AGENT`; paths repointed, Telegram channel cleared, skills → `Shared/skills`,
-   gbrain → the agent's own `.local/bin/gbrain`), `honcho.json`, SOUL stub,
+   gbrain → the agent's own `.local/bin/gbrain`), SOUL stub,
    MEMORY/USER, the two baseline crons (**memory-maintenance** and **identity
    git-sync**) + scripts, and the **normalised default-deny `.gitignore`**.
 4. **GBrain** — own profile-isolated **v0.41** runtime + wrapper + **Postgres**
    `config.json` (768-dim, `/v1` Ollama); vault skeleton (start phase installs +
    imports + embeds).
-5. **Honcho stack** — `docker-compose.yml` + `.env` + `backup.sh` with
-   **auto-allocated ports** (next free triple).
-6. **launchd plists** — gateway (sandbox-wrapped) + honcho nightly backup,
-   lint-checked.
-7. **Permissions + git** — dirs `750`, then `git init` the agent's **own repo** at
+5. **launchd plists** — gateway (sandbox-wrapped), lint-checked.
+6. **Permissions + git** — dirs `750`, then `git init` the agent's **own repo** at
    its root + initial commit. Default-deny ignore means only durable identity is
-   versioned.
-8. **Services** (unless `--no-start`) — clone Honcho, `docker compose up`,
-   embeddings, health-gate, register + kickstart launchd, `honcho_tier_sync.py`.
+   versioned. Then **services** (unless `--no-start`) — GBrain install + vault
+   import + embed, health-gate, register + kickstart launchd.
    The run finishes by calling [`verify-fleet`](../README.md#verify--test) on the new
    agent.
 
-**Port scheme.** `DB = 5432 + (API − 8000)`, `REDIS = 6379 + (API − 8000)`; the
-script scans existing compose files (e.g. 8001–8006) and takes the next free triple.
-
 **Still manual by design** (scaffolded, then paused for values): **credentials**
-(`auth.json`), the **SOUL/persona** (only a stub is written), and the **Honcho
-identity-grounding seed**. `REF_AGENT` env var picks the reference agent for
-`config.yaml`/`.env` (default: bundled templates).
+(`auth.json`) and the **SOUL/persona** (only a stub is written). `REF_AGENT` env
+var picks the reference agent for `config.yaml`/`.env` (default: bundled
+templates).
