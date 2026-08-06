@@ -1,13 +1,11 @@
 # ============================================================================
 # Agent repository .gitignore — SuperHermes normalised standard.
 #
-# MODEL: default-deny. The first rule ignores everything; the repo then
-# re-includes ONLY the agent's durable identity — config, soul, memory, skills,
-# scripts, crons, sandbox profile, and operating docs. Everything else stays out
-# by construction: secrets, caches, logs, sessions, the
-# GBrain store, isolated runtime homes, knowledge vaults, and third-party
-# workspace clones. A brand-new kind of secret file CANNOT leak — if it isn't on
-# the allow-list, it is ignored.
+# MODEL: default-deny. The repo re-includes the agent's durable identity and its
+# open `vault/` workspace (ENTIRE vault tracked — Chief decision 2026-08-06). Everything else stays out by construction.
+# Known credential payloads and generated machine state remain excluded by the
+# final rules; secret scanning is required before commits because the Brain is
+# intentionally open to normal working files.
 #
 # This file is NORMALISED across the fleet (every agent follows this standard)
 # but NOT CENTRALISED — each agent keeps its own copy at its root. Slug below is
@@ -30,7 +28,14 @@
 !/workspace-index/
 !/workspace-index/**
 
-# ── 2. The Hermes profile — curated identity subset only ────────────────────
+# ── 1a. Canonical agent Brain — open private workspace ───────────────────────
+# `vault/` is the open workspace root; `vault/brain/` remains the canonical Brain. The agent owns its contents
+# and may organise any useful files beneath it; suggested folders are guidance,
+# not gates. Final Brain-specific rules below reopen ordinary asset types while
+# keeping credential payloads and generated machine state out of Git history.
+!/vault/
+
+# ── 2. The Hermes profile — identity, skills, and plugins ────────────────────
 # Re-include each ancestor directory so git can descend, then the specific
 # durable artifacts within. (Default-deny means every parent must be re-opened.)
 !/.hermes/
@@ -48,11 +53,10 @@
 !/.hermes/profiles/__AGENT_SLUG__/cron/jobs.definition.json
 !/.hermes/profiles/__AGENT_SLUG__/scripts/
 !/.hermes/profiles/__AGENT_SLUG__/scripts/**
-# NOTE: profiles/<slug>/skills/ is deliberately NOT tracked. Skills are SHARED
-# procedural memory — they live once in the shared skills library (referenced via
-# config `skills.external_dirs`), not duplicated into every agent's identity repo
-# (that tree is 600-900 files). If an agent authors a genuinely bespoke skill it
-# wants versioned, allow-list that one path explicitly below.
+!/.hermes/profiles/__AGENT_SLUG__/skills/
+!/.hermes/profiles/__AGENT_SLUG__/skills/**
+!/.hermes/profiles/__AGENT_SLUG__/plugins/
+!/.hermes/profiles/__AGENT_SLUG__/plugins/**
 
 # ── 3. Belt-and-suspenders: never track these even inside allowed trees ──────
 # (Last-match-wins: these come AFTER the allow-list so they always win.)
@@ -73,6 +77,43 @@
 **/id_rsa*
 **/id_ed25519*
 **/*.git-credentials
+
+# Profile skills/plugins are intentional source. Re-open them after broad
+# name-based credential denials (e.g. **/*token*) so directories like
+# token_monitor / token-audit remain trackable. Runtime secret filenames below
+# still win afterward.
+!/.hermes/profiles/*/skills/
+!/.hermes/profiles/*/skills/**
+!/.hermes/profiles/*/plugins/
+!/.hermes/profiles/*/plugins/**
+# Keep secret payloads out even inside skills/plugins trees
+**/.env
+**/.env.*
+**/auth.json
+**/*secret*
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx
+**/*.kdbx
+**/*.age
+**/id_rsa*
+**/id_ed25519*
+**/*.git-credentials
+**/.hub/
+**/.archive/
+**/.usage.json*
+**/.usage.json.lock
+# Profile skill hygiene
+**/skills_disabled/
+**/skills/**/templates/**/*.pdf
+**/.bundled_manifest
+**/.curator_state
+**/.curator_backups/
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+
 # Runtime state / locks / sessions / logs
 **/logs/
 **/sessions/
@@ -84,12 +125,12 @@
 **/gateway_state.json
 **/processes.json
 **/.usage.json*
+**/.usage.json.lock
 **/.curator_state
 **/.curator_backups/
 **/.hub/
 **/.archive/
-# Memory/model binary stores (durable text lives in memories/*.md + vault, which
-# is its own repo) — never the binary indexes
+# Memory/model binary stores — human-useful Brain assets are allowed, never generated indexes
 **/*.pglite
 **/*.sqlite
 **/*.sqlite3
@@ -137,5 +178,60 @@
 #       covered by default-deny since they were never re-included) ───────────
 # /.hermes/backups/  database dumps
 # /.home/ /.cache/ /.npm/ /.local/ /.ollama/ /tmp/   isolated runtime + caches
-# /vault/            knowledge vault — its OWN git repo, kept separate
+# /vault/            ENTIRE vault is tracked (open workspace) — see section 5
 # /workspace/        working area + third-party clones — never the agent identity
+
+# ── 5. Open vault workspace — normal files are first-class ──────────────────
+# This comes last so ordinary Brain assets (images, PDFs, audio, canvases, JSON,
+# spreadsheets, archives, etc.) override the repository-wide generated-media
+# ignores above. These rules govern Git history only; they never limit what an
+# agent may create or use locally.
+!/vault/
+!/vault/**
+
+# Credentials and generated machine state belong outside the vault and
+# remain out of source control even if accidentally written beneath this root.
+/vault/**/.env
+/vault/**/.env.*
+/vault/**/auth.json
+/vault/**/*google_token*.json
+/vault/**/*credential*.json
+/vault/**/*secret*.json
+/vault/**/*token*.json
+/vault/**/.secrets/
+/vault/**/secrets/
+/vault/**/.credentials/
+/vault/**/credentials/
+/vault/**/*.pem
+/vault/**/*.key
+/vault/**/*.p12
+/vault/**/*.pfx
+/vault/**/*.kdbx
+/vault/**/*.age
+/vault/**/id_rsa*
+/vault/**/id_ed25519*
+/vault/**/.git-credentials
+/vault/**/.runtime/
+/vault/**/runtime/
+/vault/**/.gbrain/
+/vault/**/gbrain-data/
+/vault/**/.cache/
+/vault/**/.herenow/
+/vault/**/node_modules/
+/vault/**/.venv/
+/vault/**/__pycache__/
+/vault/**/*.pglite
+/vault/**/*.sqlite
+/vault/**/*.sqlite3
+/vault/**/*.db
+/vault/**/*.db-*
+/vault/**/*.wal
+/vault/**/*.shm
+/vault/**/*.lock
+/vault/**/*.pid
+/vault/**/.DS_Store
+/vault/**/*.bak*
+
+# Large scraped vendor dumps that trip secret scanners with example tokens
+**/unsloth/references/llms-full.md
+**/unsloth/references/llms-txt.md

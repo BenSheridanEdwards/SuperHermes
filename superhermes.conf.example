@@ -13,6 +13,13 @@ SKILLS_DIR="$AGENTS_ROOT/Shared/skills"
 # Python venv that runs the Hermes gateway.
 HERMES_VENV="$HOME/.hermes/hermes-agent/venv"
 
+# Optional: state JSON written by your fleet's runtime reconciler (the job that
+# proves gateway/store/backup health per agent), mapping agent ids →
+# {incident, healthy_at}. Agent ids may be bare slugs or namespaced "…:<slug>".
+# When set, verify-fleet asserts every agent is enrolled and healthy there.
+# Leave blank for a lone agent with no reconciler.
+RUNTIME_CONTRACT_STATE=""
+
 # Optional: clone a new agent's config.yaml/.env from an existing agent instead
 # of the bundled generic templates. Leave blank to use bundled templates.
 REF_AGENT=""
