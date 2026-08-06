@@ -4,8 +4,8 @@
 # MODEL: default-deny. The first rule ignores everything; the repo then
 # re-includes ONLY the agent's durable identity — config, soul, memory, skills,
 # scripts, crons, sandbox profile, and operating docs. Everything else stays out
-# by construction: secrets, caches, logs, sessions, the Honcho Docker stack, the
-# GBrain pglite store, isolated runtime homes, knowledge vaults, and third-party
+# by construction: secrets, caches, logs, sessions, the
+# GBrain store, isolated runtime homes, knowledge vaults, and third-party
 # workspace clones. A brand-new kind of secret file CANNOT leak — if it isn't on
 # the allow-list, it is ignored.
 #
@@ -40,7 +40,6 @@
 !/.hermes/profiles/
 !/.hermes/profiles/__AGENT_SLUG__/
 !/.hermes/profiles/__AGENT_SLUG__/config.yaml
-!/.hermes/profiles/__AGENT_SLUG__/honcho.json
 !/.hermes/profiles/__AGENT_SLUG__/repos.yaml
 !/.hermes/profiles/__AGENT_SLUG__/SOUL.md
 !/.hermes/profiles/__AGENT_SLUG__/memories/
@@ -136,7 +135,6 @@
 
 # ── 4. Big trees that never belong in the identity repo (clarity; already
 #       covered by default-deny since they were never re-included) ───────────
-# /.hermes/honcho/   Honcho Docker stack (cloned upstream, multi-GB)
 # /.hermes/backups/  database dumps
 # /.home/ /.cache/ /.npm/ /.local/ /.ollama/ /tmp/   isolated runtime + caches
 # /vault/            knowledge vault — its OWN git repo, kept separate

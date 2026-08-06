@@ -5,7 +5,7 @@
 # Backs up the agent's durable identity to its own private git repo, once a day.
 # The default-deny .gitignore guarantees ONLY identity files can ever be staged
 # (config, soul, memory, crons, scripts, sandbox, README) — never secrets,
-# caches, the Honcho stack, the GBrain store, the vault, or workspace clones.
+# caches, the GBrain store, the vault, or workspace clones.
 # So this stays tiny: stage-all, secret-tripwire, commit, then hold any
 # GitHub push for explicit approval (or push when AGENT_GIT_SYNC_PUSH_APPROVED=1
 # and GH_TOKEN/GITHUB_TOKEN is available in the environment).

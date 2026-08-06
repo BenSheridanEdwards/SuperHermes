@@ -20,7 +20,7 @@ terminal:
 memory:
   memory_enabled: true
   user_profile_enabled: true
-  provider: honcho
+  provider: ""
   memory_char_limit: 2200
   user_char_limit: 2500
 
