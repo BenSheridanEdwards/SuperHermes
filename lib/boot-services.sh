@@ -68,9 +68,13 @@ boot_agent_services() {
   fi
 
   say "services: GBrain install + seed"
-  if command -v bun >/dev/null; then
+  # Resolve bun via the CALLER's PATH and invoke that binary — a hard-coded
+  # /opt/homebrew/bin prepend inside the subshell would silently override the
+  # caller's resolution (and defeat PATH-shim test mocks).
+  local bun_bin; bun_bin="$(command -v bun 2>/dev/null || true)"
+  if [ -n "$bun_bin" ]; then
     ( export HOME="$PROFILE/home" BUN_INSTALL="$PROFILE/home/.bun" XDG_CACHE_HOME="$PROFILE/home/.cache" PATH="/opt/homebrew/bin:$PROFILE/home/.bun/bin:$PATH"
-      mkdir -p "$BUN_INSTALL/bin"; bun add -g "$GBRAIN_REF" >/dev/null 2>&1 ) || warn "gbrain install reported an error"
+      mkdir -p "$BUN_INSTALL/bin"; "$bun_bin" add -g "$GBRAIN_REF" >/dev/null 2>&1 ) || warn "gbrain install reported an error"
     "$AGENT_ROOT/.local/bin/gbrain" import "$AGENT_ROOT/vault/brain" >/dev/null 2>&1 || true
     "$AGENT_ROOT/.local/bin/gbrain" embed --stale >/dev/null 2>&1 || true
     ok "gbrain installed + vault seeded"

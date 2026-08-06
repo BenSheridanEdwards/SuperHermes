@@ -224,9 +224,6 @@ keys**, **memory-maintenance + git-sync crons** (+ their scripts), **normalised 
 → launchd plists → **permissions + `git init`** (the agent's own repo at its root)
 → services (GBrain installed + vault imported + embedded, gateway started).
 
-> **Known gap:** `new-agent` still provisions a honcho stack; decommissioned in
-> the reference deployment — removal tracked separately.
-
 Each agent is its **own git repo, rooted at `AGENTS_ROOT/<Name>/`**, with a
 **normalised** (not centralised) default-deny `.gitignore`: every agent follows
 the same standard, each keeps its own copy. Only the durable identity is versioned

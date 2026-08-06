@@ -41,9 +41,10 @@ for f in .hermes/profiles/test/.env .hermes/profiles/test/auth.json \
 git init -q && git add -A 2>/dev/null
 TR="$(git ls-files)"
 for want in .hermes/profiles/test/config.yaml .hermes/profiles/test/SOUL.md \
-            .hermes/profiles/test/honcho.json .hermes/profiles/test/memories/MEMORY.md \
+            .hermes/profiles/test/memories/MEMORY.md \
             .hermes/profiles/test/cron/jobs.definition.json \
             .hermes/sandbox/test.sb README.md; do assert_has "$TR" "$want" "tracks $want"; done
+assert_hasnt "$TR" "honcho.json" "excludes retired honcho.json (Honcho decommissioned)"
 assert_hasnt "$TR" ".hermes/profiles/test/cron/jobs.json" "excludes volatile cron runtime registry"
 for deny in .env auth.json google_token.json vault/ workspace/ honcho/honcho .pglite skills/; do
   assert_hasnt "$TR" "$deny" "excludes $deny"; done
