@@ -105,9 +105,42 @@ if git diff --cached --quiet; then
   exit 0
 fi
 
-if git diff --cached -U0 | grep -E '^\+' \
-   | grep -IEn 'gh[pousr]_[A-Za-z0-9_]{30,}|sk-[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9-]{20,}|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----' \
-   > "$SCRATCH" 2>/dev/null; then
+# Secret tripwire. Scan ADDED lines for concrete credential formats only.
+# A repeated-character sk- value is an obvious documentation placeholder.
+# Report only kind + diff line number — never store the suspected value.
+scan_added_secrets() {
+  git diff --cached -U0 | python3 -c '
+import re
+import sys
+
+patterns = (
+    ("github token", re.compile(rb"gh[pousr]_[A-Za-z0-9_]{30,}")),
+    ("OpenAI-style token", re.compile(rb"sk-[A-Za-z0-9]{20,}")),
+    ("Slack token", re.compile(rb"xox[baprs]-[A-Za-z0-9-]{20,}")),
+    ("AWS access key", re.compile(rb"AKIA[0-9A-Z]{16}")),
+    ("private key", re.compile(rb"-----BEGIN [A-Z ]*PRIVATE KEY-----")),
+)
+
+hits = []
+for line_number, line in enumerate(sys.stdin.buffer, 1):
+    if not line.startswith(b"+"):
+        continue
+    for kind, pattern in patterns:
+        for match in pattern.finditer(line):
+            value = match.group(0)
+            if kind == "OpenAI-style token":
+                payload = value[3:]
+                if len(set(payload)) == 1:
+                    continue
+            hits.append((line_number, kind))
+
+for line_number, kind in hits:
+    print(f"{line_number}: added line contains {kind}")
+raise SystemExit(0 if hits else 1)
+'
+}
+
+if scan_added_secrets > "$SCRATCH" 2>/dev/null; then
   git reset -q
   echo "git-sync: ABORTED — possible secret in staged diff (see $SCRATCH)"
   exit 2
