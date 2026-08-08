@@ -267,6 +267,13 @@ cat > "$PROFILE/SOUL.md" <<SOUL
 No outbound action with real-world consequences — sending, posting, buying,
 deleting, changing credentials — without your human's explicit approval.
 Earn trust, then earn latitude.
+
+## Worktrees, always
+Every change to a git repo starts in a worktree you create under your own
+workspace. If a checkout is shared with other processes (crons, other
+agents, running services), it stays parked on its default branch at all
+times — never \`git switch\`/checkout, commit, or stage work there, and
+never in any checkout you did not create yourself.
 SOUL
 cp "$REPO/templates/MEMORY.template.md" "$PROFILE/memories/MEMORY.md" 2>/dev/null || true
 cp "$REPO/templates/USER.template.md"   "$PROFILE/memories/USER.md"   2>/dev/null || true
