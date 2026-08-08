@@ -15,7 +15,12 @@
 # Best-effort per phase. Returns non-zero only on a preflight that makes
 # booting pointless (disk below floor). verify-fleet is the green gate.
 
-GBRAIN_REF="${GBRAIN_REF:-github:garrytan/gbrain#248fb7a90f9ce5fe2e5d01fe486345d08834ed40}"  # 0.41.38.0
+# 0.41.38.0 + stdio-stderr patch (fork of garrytan/gbrain@248fb7a9): routes
+# slog/console progress to stderr under `gbrain serve` so vault-import/embed
+# lines can't corrupt the MCP stdio JSON-RPC channel (was flooding every
+# gateway.error.log with "Failed to parse JSONRPC message"). Upstream PR
+# candidate; repin to upstream once merged.
+GBRAIN_REF="${GBRAIN_REF:-github:BenSheridanEdwards/gbrain#3eec49b59e4cc91552b8212243438f5a98b7361f}"
 DISK_FLOOR_GB="${DISK_FLOOR_GB:-25}"
 
 say(){ printf '\033[36m%s\033[0m\n' "$*"; }
