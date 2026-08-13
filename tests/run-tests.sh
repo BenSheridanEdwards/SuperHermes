@@ -110,6 +110,18 @@ pl="$(cat "$td/LaunchAgents/ai.hermes.gateway-testunit.plist" 2>/dev/null)"
 assert_has "$pl" "Shared/bin/hermes-gateway-launch" "gateway plist uses shared launcher"
 assert_hasnt "$pl" "hermes_cli.main"                "gateway plist does not bypass shared launcher"
 assert_has "$pl" "<string>testunit</string>"        "gateway plist passes slug to launcher"
+configured_soft_file_limit="$(python3 - "$td/LaunchAgents/ai.hermes.gateway-testunit.plist" <<'PY'
+import plistlib
+import sys
+
+with open(sys.argv[1], "rb") as property_list_file:
+    property_list = plistlib.load(property_list_file)
+print(property_list.get("SoftResourceLimits", {}).get("NumberOfFiles", 0))
+PY
+)"
+[ "$configured_soft_file_limit" -ge 4096 ] \
+  && ok "new gateway jobs have file-descriptor headroom" \
+  || bad "new gateway jobs must allow at least 4096 open files"
 configured_max_turns="$(python3 - "$td/TestUnit/.hermes/profiles/testunit/config.yaml" <<'PY'
 import sys,yaml
 print(yaml.safe_load(open(sys.argv[1]))["agent"]["max_turns"])
