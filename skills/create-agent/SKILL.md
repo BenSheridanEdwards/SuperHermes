@@ -27,7 +27,8 @@ above, and keeping it out is what lets this stay open-source and fleet-agnostic.
 - `superhermes.conf` exists (copy from `.example`) with `AGENTS_ROOT` + sandbox
   carve-outs set. Without it, `new-agent` uses example defaults.
 - **Bun** installed (GBrain); Postgres reachable (GBrain store); **Ollama** up on
-  `:11534` (local embeddings). macOS (`sandbox-exec` + launchd).
+  `:11434` with the OpenAI-compatible `/v1` base (local embeddings). macOS
+  (`sandbox-exec` + launchd).
 - Name is PascalCase and the dir does not already exist.
 
 ## 2. Dry-run first — always
