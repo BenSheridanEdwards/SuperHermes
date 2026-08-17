@@ -120,7 +120,7 @@ python3 -m json.tool "$REPO/templates/agent-template.json" >/dev/null 2>&1 \
   && ok "agent template manifest parses" || bad "agent template manifest parses"
 AGENTS_ROOT=""; [ -f "$REPO/superhermes.conf" ] && . "$REPO/superhermes.conf" || . "$REPO/superhermes.conf.example"
 [ -d "${AGENTS_ROOT:-/nonexistent}/TestUnit" ] && bad "dry-run left a real agent dir!" || ok "dry-run leaves no real agent dir"
-# GBrain at birth is Postgres fleet standard (never PGLite / never :11434).
+# GBrain at birth is Postgres fleet standard (never PGLite / never stale :11534).
 gcfg="$(cat "$td/TestUnit/.hermes/profiles/testunit/home/.gbrain/config.json" 2>/dev/null)"
 assert_has   "$gcfg" '"engine": "postgres"'              "gbrain config engine is postgres"
 assert_has   "$gcfg" 'postgres://gbrain_testunit@'       "gbrain config database_url uses gbrain_<slug>"
