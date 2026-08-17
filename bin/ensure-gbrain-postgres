@@ -7,7 +7,7 @@ Writes profile-home `.gbrain/config.json` with:
   engine=postgres
   database_url=postgres://gbrain_<slug>@localhost:5432/gbrain_<slug>
   source_path=<agent>/vault/brain
-  embedding → ollama nomic-embed-text @ http://localhost:11534/v1
+  embedding → ollama nomic-embed-text @ http://127.0.0.1:11434/v1
   schema_pack=gbrain-base-v2
 
 Unless --config-only, also CREATE ROLE + CREATE DATABASE (idempotent) via a
@@ -30,7 +30,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-DEFAULT_EMBED_URL = "http://localhost:11534/v1"
+DEFAULT_EMBED_URL = "http://127.0.0.1:11434/v1"
 DEFAULT_EMBED_MODEL = "ollama:nomic-embed-text:latest"
 DEFAULT_SCHEMA = "gbrain-base-v2"
 DEFAULT_ADMIN_CANDIDATES = (

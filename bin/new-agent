@@ -297,7 +297,7 @@ ok "SOUL + MEMORY/USER + .env(secret keys) + cron(memory-maintenance + git-sync)
 # ---- 4. gbrain (profile-isolated v0.41; Postgres fleet standard) ------------
 say "4/7  GBrain"
 mkdir -p "$PROFILE/home/.gbrain" "$AGENT_ROOT/.local/bin" "$AGENT_ROOT/vault/brain"
-# Fleet standard: Postgres at birth (never PGLite). Embed on fleet Ollama :11534.
+# Fleet standard: Postgres at birth (never PGLite). Embed on Ollama :11434/v1.
 # Dry-run writes config only; live scaffold also CREATE ROLE/DATABASE.
 # Client trees live under .../Clients/<client>/<Name>. Match Fleet identity
 # gbrain_<client>_<slug> so pointers and runtime contract never disagree.
@@ -340,7 +340,7 @@ printf '# %s - GBrain\n\nKnowledge base index.\n' "$NAME" > "$AGENT_ROOT/vault/b
 # Guarantee config.yaml carries the correct gbrain MCP block (own wrapper +
 # serve + enabled + HOME/HERMES_HOME). Idempotent.
 python3 "$REPO/bin/ensure-gbrain-mcp" "$PROFILE/config.yaml" "$AGENT_ROOT" "$PROFILE" || true
-ok "gbrain config (postgres + embed :11534) + own wrapper + MCP block + vault/brain"
+ok "gbrain config (postgres + embed :11434/v1) + own wrapper + MCP block + vault/brain"
 
 # ---- 5. launchd plists ------------------------------------------------------
 say "5/7  launchd plists"
