@@ -9,7 +9,7 @@ export HERMES_HOME="$PROFILE"
 export HOME="$PROFILE/home"
 export BUN_INSTALL="$HOME/.bun"
 export XDG_CACHE_HOME="$HOME/.cache"
-# Fleet embed host is Ollama on :11534.
-export OLLAMA_BASE_URL="${OLLAMA_BASE_URL:-http://127.0.0.1:11534/v1}"
+# Ollama's OpenAI-compatible local endpoint needs the /v1 API base.
+export OLLAMA_BASE_URL="${OLLAMA_BASE_URL:-http://127.0.0.1:11434/v1}"
 export PATH="/opt/homebrew/bin:$BUN_INSTALL/bin:${PATH:-}"
 exec "$BUN_INSTALL/bin/gbrain" "$@"
