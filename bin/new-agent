@@ -362,6 +362,12 @@ cat > "$LA/ai.hermes.gateway-$SLUG.plist" <<PLIST
     <key>VIRTUAL_ENV</key><string>$HERMES_VENV</string>
     <key>PATH</key><string>$HERMES_VENV/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
   </dict>
+  <!-- launchd otherwise gives user jobs a 256-file soft limit. A gateway can
+       hold model, platform, MCP, LSP, and tool subprocess descriptors at the
+       same time, so the default can stop every tool and provider call. -->
+  <key>SoftResourceLimits</key><dict>
+    <key>NumberOfFiles</key><integer>4096</integer>
+  </dict>
   <key>RunAtLoad</key><true/><key>KeepAlive</key><true/>
   <key>StandardOutPath</key><string>$PROFILE/logs/gateway.log</string>
   <key>StandardErrorPath</key><string>$PROFILE/logs/gateway.error.log</string>
