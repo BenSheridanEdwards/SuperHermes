@@ -4,7 +4,7 @@
   "summary": "One isolated Hermes agent with durable identity, private runtime, and a separate knowledge vault.",
   "command": {
     "program": "Shared/SuperHermes/bin/new-agent",
-    "args": ["--name", "<Name>", "--camp", "<camp>", "--tier", "<s|m|l>"],
+    "args": ["--name", "<Name>", "--camp", "<camp>"],
     "dry_run_args": ["--dry-run"],
     "no_start_args": ["--no-start"]
   },
@@ -13,7 +13,6 @@
     { "path": ".hermes/profiles/<slug>/SOUL.md", "kind": "identity", "tracked": true, "purpose": "Agent persona, scope, and trust boundary." },
     { "path": ".hermes/profiles/<slug>/memories/MEMORY.md", "kind": "bootstrap", "tracked": true, "purpose": "Tiny always-loaded agent memory." },
     { "path": ".hermes/profiles/<slug>/memories/USER.md", "kind": "bootstrap", "tracked": true, "purpose": "Tiny always-loaded user profile." },
-    { "path": ".hermes/profiles/<slug>/honcho.json", "kind": "memory", "tracked": true, "purpose": "Honcho host, workspace, peer, and recall settings." },
     { "path": ".hermes/profiles/<slug>/cron/jobs.definition.json", "kind": "automation", "tracked": true, "purpose": "Durable scheduled-job definitions without scheduler run state." },
     { "path": ".hermes/profiles/<slug>/cron/jobs.json", "kind": "runtime", "tracked": false, "purpose": "Live scheduler registry with claims and last-run state." },
     { "path": ".hermes/profiles/<slug>/scripts/", "kind": "automation", "tracked": true, "purpose": "Profile-local maintained scripts." },
@@ -40,7 +39,6 @@
     ".npm/",
     ".local/",
     ".ollama/",
-    "tmp/",
-    ".hermes/honcho/"
+    "tmp/"
   ]
 }

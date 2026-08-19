@@ -1,0 +1,184 @@
+#!/usr/bin/env python3
+"""ensure-gbrain-postgres — fleet-standard GBrain store at agent birth.
+
+Hard cut (Chief 2026-07-22): new agents get Postgres, not PGLite.
+
+Writes profile-home `.gbrain/config.json` with:
+  engine=postgres
+  database_url=postgres://gbrain_<slug>@localhost:5432/gbrain_<slug>
+  source_path=<agent>/vault/brain
+  embedding → ollama nomic-embed-text @ http://127.0.0.1:11434/v1
+  schema_pack=gbrain-base-v2
+
+Unless --config-only, also CREATE ROLE + CREATE DATABASE (idempotent) via a
+local GBrain superuser connection (default: gbrain_wukong peer/passwordless
+TCP on localhost:5432).
+
+Usage:
+  ensure-gbrain-postgres --slug <slug> --agent-root <path> --profile-home <path>
+                         [--config-only] [--admin-url URL]
+
+Exit: 0 ok; 2 usage; 3 database provision failed (config still written when possible)
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+DEFAULT_EMBED_URL = "http://127.0.0.1:11434/v1"
+DEFAULT_EMBED_MODEL = "ollama:nomic-embed-text:latest"
+DEFAULT_SCHEMA = "gbrain-base-v2"
+DEFAULT_ADMIN_CANDIDATES = (
+    os.environ.get("FLEET_GBRAIN_ADMIN_URL") or "",
+    "postgres://gbrain_wukong@localhost:5432/postgres",
+    "postgres://gbrain_jeeves@localhost:5432/postgres",
+    "postgres://gbrain_iris@localhost:5432/postgres",
+)
+
+
+def die(msg: str, code: int = 2) -> None:
+    print(f"ensure-gbrain-postgres: {msg}", file=sys.stderr)
+    raise SystemExit(code)
+
+
+def normalize_identity(slug: str, client_id: str | None = None) -> str:
+    """Match Fleet monitoring gbrain_database_identity for self-scoped agents."""
+    source = f"{client_id}_{slug}" if client_id else slug
+    normalized = re.sub(r"[^a-z0-9_]", "_", source.lower())
+    candidate = f"gbrain_{normalized}"
+    if len(candidate) <= 63:
+        return candidate
+    import hashlib
+
+    digest = hashlib.sha256(source.encode("utf-8")).hexdigest()[:10]
+    return f"{candidate[:52]}_{digest}"
+
+
+def write_config(profile_home: Path, agent_root: Path, db_id: str) -> Path:
+    gdir = profile_home / ".gbrain"
+    gdir.mkdir(parents=True, exist_ok=True)
+    cfg_path = gdir / "config.json"
+    payload = {
+        "engine": "postgres",
+        "database_url": f"postgres://{db_id}@localhost:5432/{db_id}",
+        "source_path": str(agent_root / "vault" / "brain"),
+        "embedding_model": DEFAULT_EMBED_MODEL,
+        "embedding_dimensions": 768,
+        "embedding_base_url": DEFAULT_EMBED_URL,
+        "schema_pack": DEFAULT_SCHEMA,
+        "mcp": {"publish_skills": True},
+    }
+    # Never leave pglite as the live engine. Keep any legacy file as backup once.
+    if cfg_path.exists():
+        try:
+            old = json.loads(cfg_path.read_text())
+        except Exception:
+            old = {}
+        if old.get("engine") == "pglite" or "database_path" in old:
+            bak = gdir / "config.json.bak-before-postgres-scaffold"
+            if not bak.exists():
+                bak.write_text(cfg_path.read_text())
+    cfg_path.write_text(json.dumps(payload, indent=2) + "\n")
+    return cfg_path
+
+
+def psql(admin_url: str, sql: str) -> tuple[int, str, str]:
+    proc = subprocess.run(
+        ["psql", admin_url, "-v", "ON_ERROR_STOP=1", "-tAc", sql],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    return proc.returncode, (proc.stdout or "").strip(), (proc.stderr or "").strip()
+
+
+def pick_admin(explicit: str | None) -> str | None:
+    candidates = []
+    if explicit:
+        candidates.append(explicit)
+    candidates.extend(u for u in DEFAULT_ADMIN_CANDIDATES if u)
+    for url in candidates:
+        code, out, err = psql(url, "SELECT 1")
+        if code == 0 and out.startswith("1"):
+            return url
+    return None
+
+
+def provision_db(admin_url: str, db_id: str) -> None:
+    # Superuser + BYPASSRLS matches live fleet cutover recipe.
+    role_sql = f"""
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '{db_id}') THEN
+    CREATE ROLE {db_id} LOGIN SUPERUSER BYPASSRLS;
+  END IF;
+END$$;
+"""
+    code, out, err = psql(admin_url, role_sql)
+    if code != 0:
+        die(f"CREATE ROLE failed for {db_id}: {err or out}", 3)
+
+    code, out, err = psql(
+        admin_url,
+        f"SELECT 1 FROM pg_database WHERE datname = '{db_id}'",
+    )
+    if code != 0:
+        die(f"database existence check failed: {err or out}", 3)
+    if out.startswith("1"):
+        return
+    code, out, err = psql(admin_url, f'CREATE DATABASE "{db_id}" OWNER "{db_id}"')
+    if code != 0:
+        die(f"CREATE DATABASE failed for {db_id}: {err or out}", 3)
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--slug", required=True)
+    ap.add_argument("--agent-root", required=True, type=Path)
+    ap.add_argument("--profile-home", required=True, type=Path)
+    ap.add_argument("--client-id", default=None, help="optional client scope for db identity")
+    ap.add_argument(
+        "--config-only",
+        action="store_true",
+        help="write config.json only (dry-run / no live Postgres)",
+    )
+    ap.add_argument("--admin-url", default=None)
+    args = ap.parse_args()
+
+    slug = args.slug.strip().lower()
+    if not re.fullmatch(r"[a-z][a-z0-9_-]*", slug):
+        die(f"invalid slug: {slug!r}")
+
+    agent_root = args.agent_root.expanduser().resolve()
+    profile_home = args.profile_home.expanduser().resolve()
+    db_id = normalize_identity(slug, args.client_id)
+
+    cfg_path = write_config(profile_home, agent_root, db_id)
+    print(f"ensure-gbrain-postgres: wrote {cfg_path} (engine=postgres db={db_id})")
+
+    if args.config_only:
+        print("ensure-gbrain-postgres: config-only (skipped CREATE ROLE/DATABASE)")
+        return
+
+    admin = pick_admin(args.admin_url)
+    if not admin:
+        die(
+            "no working admin Postgres URL "
+            "(set FLEET_GBRAIN_ADMIN_URL or ensure gbrain_wukong can connect)",
+            3,
+        )
+    provision_db(admin, db_id)
+    # Prove role can connect to its DB (may be empty until first gbrain import).
+    code, out, err = psql(f"postgres://{db_id}@localhost:5432/{db_id}", "SELECT current_database()")
+    if code != 0:
+        die(f"role connect smoke failed for {db_id}: {err or out}", 3)
+    print(f"ensure-gbrain-postgres: provisioned and connected {db_id}")
+
+
+if __name__ == "__main__":
+    main()

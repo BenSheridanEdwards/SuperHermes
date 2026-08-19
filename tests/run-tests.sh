@@ -41,9 +41,10 @@ for f in .hermes/profiles/test/.env .hermes/profiles/test/auth.json \
 git init -q && git add -A 2>/dev/null
 TR="$(git ls-files)"
 for want in .hermes/profiles/test/config.yaml .hermes/profiles/test/SOUL.md \
-            .hermes/profiles/test/honcho.json .hermes/profiles/test/memories/MEMORY.md \
+            .hermes/profiles/test/memories/MEMORY.md \
             .hermes/profiles/test/cron/jobs.definition.json \
             .hermes/sandbox/test.sb README.md; do assert_has "$TR" "$want" "tracks $want"; done
+assert_hasnt "$TR" "honcho.json" "excludes retired honcho.json (Honcho decommissioned)"
 assert_hasnt "$TR" ".hermes/profiles/test/cron/jobs.json" "excludes volatile cron runtime registry"
 for deny in .env auth.json google_token.json vault/ workspace/ honcho/honcho .pglite skills/; do
   assert_hasnt "$TR" "$deny" "excludes $deny"; done
@@ -54,6 +55,16 @@ section "git-sync.sh — silent success, secret tripwire, no force-push"
 T="$(mktemp -d)"; cd "$T"
 A_ROOT="$T/repo" A_SLUG=test A_NAME=Test render "$REPO/templates/git-sync.sh.tmpl" > sync.sh; chmod +x sync.sh
 if grep -qE 'push .*(--force|-f)\b' sync.sh; then bad "rendered script never force-pushes"; else ok "rendered script never force-pushes"; fi
+# Scar 2026-08-06: bare git push hangs non-interactively — template must header-push only.
+if grep -qE 'if (! )?git push -q origin' sync.sh; then bad "rendered script never bare-pushes first"; else ok "rendered script never bare-pushes first"; fi
+assert_has "$(cat sync.sh)" 'extraheader=AUTHORIZATION' "rendered script uses HTTPS auth header push"
+assert_has "$(cat sync.sh)" 'GH_TOKEN' "rendered script accepts GH_TOKEN from the environment"
+assert_has "$(cat sync.sh)" 'AGENT_GIT_SYNC_PUSH_APPROVED:-0' "SuperHermes standing default withholds push"
+assert_hasnt "$(cat sync.sh)" 'AGENT_GIT_SYNC_PUSH_APPROVED:-1' "SuperHermes template is not fleet push-on default"
+assert_hasnt "$(cat sync.sh)" '.fleet.env' "SuperHermes template stays free of fleet host paths"
+assert_hasnt "$(cat sync.sh)" '/Users/agents/.hermes/bin/bws' "SuperHermes template stays free of fleet BWS paths"
+assert_has "$(cat sync.sh)" 'Camp-specific secret plumbing' "template documents fleet overlay boundary"
+if bash -n sync.sh; then ok "rendered script bash -n clean"; else bad "rendered script bash -n clean"; fi
 mkdir repo; cd repo; git init -q; echo a > f; git add -A; git -c user.name=t -c user.email=t@t commit -qm init
 run(){ AGENT_GIT_ROOT="$T/repo" bash "$T/sync.sh" 2>&1; }
 out="$(run)"; rc=$?; assert_eq "$rc" "0" "noop exits 0"; assert_eq "$out" "" "noop is silent"
@@ -87,7 +98,7 @@ cd "$REPO"; rm -rf "$T"
 
 # ---------------------------------------------------------------------------
 section "new-agent --dry-run — renders the full anatomy, zero side effects"
-out="$(bash "$REPO/bin/new-agent" --name TestUnit --camp test --tier m --dry-run 2>&1)"; rc=$?
+out="$(bash "$REPO/bin/new-agent" --name TestUnit --camp test --dry-run 2>&1)"; rc=$?
 assert_eq "$rc" "0" "dry-run exits 0"
 assert_has "$out" "testunit.sb (compiles)"  "sandbox compiles"
 assert_has "$out" "root .gitignore"          "renders normalised root .gitignore"
@@ -109,6 +120,61 @@ python3 -m json.tool "$REPO/templates/agent-template.json" >/dev/null 2>&1 \
   && ok "agent template manifest parses" || bad "agent template manifest parses"
 AGENTS_ROOT=""; [ -f "$REPO/superhermes.conf" ] && . "$REPO/superhermes.conf" || . "$REPO/superhermes.conf.example"
 [ -d "${AGENTS_ROOT:-/nonexistent}/TestUnit" ] && bad "dry-run left a real agent dir!" || ok "dry-run leaves no real agent dir"
+# GBrain at birth is Postgres fleet standard (never PGLite / never stale :11534).
+gcfg="$(cat "$td/TestUnit/.hermes/profiles/testunit/home/.gbrain/config.json" 2>/dev/null)"
+assert_has   "$gcfg" '"engine": "postgres"'              "gbrain config engine is postgres"
+assert_has   "$gcfg" 'postgres://gbrain_testunit@'       "gbrain config database_url uses gbrain_<slug>"
+assert_has   "$gcfg" '127.0.0.1:11434/v1'                "gbrain config embed URL is Ollama :11434/v1"
+assert_has   "$gcfg" 'gbrain-base-v2'                    "gbrain config sets schema_pack"
+assert_hasnt "$gcfg" 'pglite'                            "gbrain config has no pglite"
+assert_hasnt "$gcfg" '11534'                             "gbrain config does not use stale :11534"
+wrap="$(cat "$td/TestUnit/.local/bin/gbrain" 2>/dev/null)"
+assert_has   "$wrap" '11434/v1'                          "gbrain wrapper defaults OLLAMA to :11434/v1"
+assert_hasnt "$wrap" '11534'                             "gbrain wrapper does not default stale :11534"
+mcg="$(python3 - "$td/TestUnit/.hermes/profiles/testunit/config.yaml" <<'PY'
+import sys
+text = open(sys.argv[1]).read().splitlines()
+out = []
+grab = False
+for line in text:
+    if line.rstrip() == "  gbrain:":
+        grab = True
+        out.append(line)
+        continue
+    if grab:
+        if line.startswith("    "):
+            out.append(line)
+        else:
+            break
+print("\n".join(out))
+PY
+)"
+assert_has "$mcg" "args:" "gbrain MCP has args"
+assert_has "$mcg" "- serve" "gbrain MCP serves"
+assert_has "$mcg" "enabled: true" "gbrain MCP enabled"
+assert_has "$mcg" "HOME:" "gbrain MCP pins HOME"
+assert_has "$mcg" "HERMES_HOME:" "gbrain MCP pins HERMES_HOME"
+
+# ---------------------------------------------------------------------------
+section "ensure-gbrain-postgres — config-only writes fleet shape"
+T="$(mktemp -d)"
+python3 "$REPO/bin/ensure-gbrain-postgres" --slug probeagent --agent-root "$T/Probe" \
+  --profile-home "$T/Probe/.hermes/profiles/probeagent/home" --config-only >/dev/null
+gcfg="$(cat "$T/Probe/.hermes/profiles/probeagent/home/.gbrain/config.json")"
+assert_has "$gcfg" '"engine": "postgres"' "ensure-gbrain-postgres writes postgres engine"
+assert_has "$gcfg" 'gbrain_probeagent' "ensure-gbrain-postgres db id is gbrain_<slug>"
+assert_has "$gcfg" '11434/v1' "ensure-gbrain-postgres embed :11434/v1"
+assert_hasnt "$gcfg" 'pglite' "ensure-gbrain-postgres never pglite"
+rm -rf "$T"
+# Client-scoped identity must match Fleet gbrain_<client>_<slug>
+T="$(mktemp -d)"
+python3 "$REPO/bin/ensure-gbrain-postgres" --slug hunter --client-id jake \
+  --agent-root "$T/Clients/Jake/Hunter" \
+  --profile-home "$T/Clients/Jake/Hunter/.hermes/profiles/hunter/home" --config-only >/dev/null
+gcfg="$(cat "$T/Clients/Jake/Hunter/.hermes/profiles/hunter/home/.gbrain/config.json")"
+assert_has "$gcfg" 'gbrain_jake_hunter' "client gbrain identity is gbrain_<client>_<slug>"
+assert_hasnt "$gcfg" 'gbrain_hunter@' "client identity is not bare gbrain_<slug>"
+rm -rf "$T"
 
 # ---------------------------------------------------------------------------
 section "set-model-block — read round-trips; write replaces ONLY the model section"
@@ -129,7 +195,7 @@ rm -rf "$T"
 
 # ---------------------------------------------------------------------------
 section "new-agent — model flags render the chosen primary + fallbacks + round-robin"
-out="$(bash "$REPO/bin/new-agent" --name TestModel --camp test --tier m --dry-run \
+out="$(bash "$REPO/bin/new-agent" --name TestModel --camp test --dry-run \
   --provider anthropic --model claude-x --fallback xai-oauth:grok-4.3 --fallback opencode-go:kimi-k2-6 --round-robin 2>&1)"; rc=$?
 assert_eq "$rc" "0" "model dry-run exits 0"
 td="$(printf '%s' "$out" | python3 -c "import sys,re;t=re.sub(r'\x1b\[[0-9;]*m','',sys.stdin.read());m=re.search(r'dry-run . (\S+)',t);print(m.group(1) if m else '')")"

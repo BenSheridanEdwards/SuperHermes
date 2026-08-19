@@ -5,16 +5,23 @@
 # Backs up the agent's durable identity to its own private git repo, once a day.
 # The default-deny .gitignore guarantees ONLY identity files can ever be staged
 # (config, soul, memory, crons, scripts, sandbox, README) — never secrets,
-# caches, the Honcho stack, the GBrain store, the vault, or workspace clones.
+# caches, the GBrain store, the vault, or workspace clones.
 # So this stays tiny: stage-all, secret-tripwire, commit, then hold any
-# GitHub push for explicit approval.
+# GitHub push for explicit approval (or push when AGENT_GIT_SYNC_PUSH_APPROVED=1
+# and GH_TOKEN/GITHUB_TOKEN is available in the environment).
 #
 # Properties:
 #   • Idempotent — no diff → no commit, no noise.
 #   • Safe in unattended cron — NEVER pushes to GitHub by default. Set
-#     AGENT_GIT_SYNC_PUSH_APPROVED=1 only from a Chief-approved/manual run to
-#     push. It never force-pushes.
+#     AGENT_GIT_SYNC_PUSH_APPROVED=1 only when a token is also available.
+#     It never force-pushes.
 #   • Fails closed on a suspected secret pasted into a tracked file.
+#   • Never bare `git push` first — non-interactive hosts often hang on the
+#     credential helper (scar 2026-08-06). Push only via env token + HTTPS header.
+#
+# Camp-specific secret plumbing (Bitwarden, fleet env files, hard-coded host
+# paths) does NOT belong here. Downstream camps (e.g. Fleet) overlay their own
+# git-sync after scaffold when they need vault-backed tokens.
 #
 # OUTPUT CONTRACT (runs as a no_agent cron job → stdout is delivered verbatim to
 # the human, empty stdout = silent). So this stays SILENT on success / no-op and
@@ -28,6 +35,14 @@
 # ============================================================================
 set -euo pipefail
 
+# Unattended cron must never invoke an interactive credential helper.
+export GIT_TERMINAL_PROMPT=0
+export GIT_ASKPASS=/usr/bin/false
+export SSH_ASKPASS=/usr/bin/false
+export GIT_CONFIG_COUNT=1
+export GIT_CONFIG_KEY_0=credential.helper
+export GIT_CONFIG_VALUE_0=
+
 ROOT="${AGENT_GIT_ROOT:-__AGENT_ROOT__}"
 NAME="__AGENT_NAME__"
 SLUG="__AGENT_SLUG__"
@@ -38,21 +53,13 @@ CRON_SNAPSHOT="$ROOT/.hermes/profiles/$SLUG/scripts/cron_registry_snapshot.py"
 cd "$ROOT" 2>/dev/null || { echo "git-sync: no directory at $ROOT"; exit 1; }
 [ -d .git ] || { echo "git-sync: $ROOT is not a git repo"; exit 1; }
 
-# Clear an index.lock orphaned by a git op killed mid-write (a reboot, crash, or
-# OOM-kill). Liveness — does a process still hold it open? — is the ONLY safe
-# signal; age is not. A lock orphaned seconds before this run has a fresh mtime
-# yet no owner, so gating on mtime (the old `-mmin -5`) skips exactly that case
-# and turns every daily run into a CRIT until cleared by hand — what bit Doc and
-# Probe on 2026-06-20. lsof showing no holder means it's an orphan; git itself
-# tells you to remove it. Silent per the output contract — no human action needed.
+# Clear an index.lock orphaned by a git op killed mid-write. Liveness is the
+# only safe signal (scar Doc/Probe 2026-06-20).
 lock=".git/index.lock"
 if [ -f "$lock" ] && ! lsof "$lock" >/dev/null 2>&1; then
   rm -f "$lock"
 fi
 
-# The live Hermes registry mixes durable job definitions with last-run state.
-# Snapshot only the durable definition before staging so scheduler heartbeats,
-# claims, and completion timestamps can never create identity-history churn.
 if [ -f "$CRON_SNAPSHOT" ]; then
   python3 "$CRON_SNAPSHOT" || {
     echo "git-sync: cron definition snapshot failed — preserving the last good backup"
@@ -66,9 +73,23 @@ push_if_approved() {
     echo "$NAME git-sync: committed locally; GitHub push withheld pending approval - run: AGENT_GIT_SYNC_PUSH_APPROVED=1 $0"
     return 0
   fi
-  if ! git push -q origin "$BRANCH" 2>/dev/null; then
-    git fetch -q origin "$BRANCH" 2>/dev/null || true
-    if ! { git rebase -q "origin/$BRANCH" 2>/dev/null && git push -q origin "$BRANCH" 2>/dev/null; }; then
+
+  # Portable auth: env token only. Never bare-push (hangs non-interactively).
+  local token="${GH_TOKEN:-${GITHUB_TOKEN:-}}"
+  if [ -z "$token" ]; then
+    echo "$NAME git-sync: committed locally but PUSH FAILED - set GH_TOKEN or GITHUB_TOKEN for non-interactive HTTPS push"
+    return 0
+  fi
+  local auth_b64
+  auth_b64=$(printf 'x-access-token:%s' "$token" | base64 | tr -d '\n')
+  if ! git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${auth_b64}" push -q origin "$BRANCH"; then
+    git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${auth_b64}" fetch -q origin "$BRANCH" 2>/dev/null || true
+    if git rebase -q "origin/$BRANCH" 2>/dev/null; then
+      if ! git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${auth_b64}" push -q origin "$BRANCH"; then
+        git rebase --abort 2>/dev/null || true
+        echo "$NAME git-sync: committed locally but PUSH FAILED - resolve: git -C $ROOT push origin $BRANCH"
+      fi
+    else
       git rebase --abort 2>/dev/null || true
       echo "$NAME git-sync: committed locally but PUSH FAILED - resolve: git -C $ROOT push origin $BRANCH"
     fi
@@ -77,8 +98,6 @@ push_if_approved() {
 
 git add -A
 
-# No changes -> silent success, unless a manual approved run is flushing
-# previously committed local backups to GitHub.
 if git diff --cached --quiet; then
   if [ "${AGENT_GIT_SYNC_PUSH_APPROVED:-0}" = "1" ]; then
     push_if_approved
@@ -86,13 +105,42 @@ if git diff --cached --quiet; then
   exit 0
 fi
 
-# Secret tripwire. The .gitignore stops secret *files*, but a token could be
-# pasted INTO a tracked file (a memory note, config, script). Scan ADDED lines
-# for concrete credential formats only (high-confidence — no key=value heuristic
-# that would false-positive and silently halt the daily backup).
-if git diff --cached -U0 | grep -E '^\+' \
-   | grep -IEn 'gh[pousr]_[A-Za-z0-9_]{30,}|sk-[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9-]{20,}|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----' \
-   > "$SCRATCH" 2>/dev/null; then
+# Secret tripwire. Scan ADDED lines for concrete credential formats only.
+# A repeated-character sk- value is an obvious documentation placeholder.
+# Report only kind + diff line number — never store the suspected value.
+scan_added_secrets() {
+  git diff --cached -U0 | python3 -c '
+import re
+import sys
+
+patterns = (
+    ("github token", re.compile(rb"gh[pousr]_[A-Za-z0-9_]{30,}")),
+    ("OpenAI-style token", re.compile(rb"sk-[A-Za-z0-9]{20,}")),
+    ("Slack token", re.compile(rb"xox[baprs]-[A-Za-z0-9-]{20,}")),
+    ("AWS access key", re.compile(rb"AKIA[0-9A-Z]{16}")),
+    ("private key", re.compile(rb"-----BEGIN [A-Z ]*PRIVATE KEY-----")),
+)
+
+hits = []
+for line_number, line in enumerate(sys.stdin.buffer, 1):
+    if not line.startswith(b"+"):
+        continue
+    for kind, pattern in patterns:
+        for match in pattern.finditer(line):
+            value = match.group(0)
+            if kind == "OpenAI-style token":
+                payload = value[3:]
+                if len(set(payload)) == 1:
+                    continue
+            hits.append((line_number, kind))
+
+for line_number, kind in hits:
+    print(f"{line_number}: added line contains {kind}")
+raise SystemExit(0 if hits else 1)
+'
+}
+
+if scan_added_secrets > "$SCRATCH" 2>/dev/null; then
   git reset -q
   echo "git-sync: ABORTED — possible secret in staged diff (see $SCRATCH)"
   exit 2
@@ -103,4 +151,3 @@ git -c user.name="$NAME" -c user.email="${SLUG}@agents.local" \
     commit -q -m "auto: $NAME identity sync ($(date -u +'%Y-%m-%d %H:%M UTC'))"
 
 push_if_approved
-# (silent on full success — no_agent cron stays quiet unless action is needed)

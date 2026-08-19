@@ -12,7 +12,7 @@
 # then use GBrain MCP tools / file search instead.
 #   agent: __AGENT_NAME__ (slug __AGENT_SLUG__)
 # ============================================================================
-import json, subprocess, urllib.request
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -55,15 +55,6 @@ if GBRAIN.exists():
                   f"PGLite lock → use MCP tools / file search)\n{out[:300]}")
 else:
     print(f"  OWN WRAPPER MISSING at {GBRAIN} — GBrain is misconfigured")
-
-# --- Honcho health ----------------------------------------------------------
-print("\n## Honcho")
-try:
-    base = json.loads((PROFILE / "honcho.json").read_text()).get("baseUrl", "").rstrip("/")
-    with urllib.request.urlopen(base + "/health", timeout=5) as r:
-        print(f"  {base}/health → HTTP {r.status}")
-except Exception as e:
-    print(f"  health check failed: {type(e).__name__}: {e}")
 
 print("\n## Watch for (hygiene)")
 print("  Wrong employer/client identity · misspelled personal emails · inferred")

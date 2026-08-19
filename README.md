@@ -5,13 +5,13 @@ persistent memory — and spin up a new one with a single command.**
 
 SuperHermes is a framework and reference architecture for
 [Hermes](https://github.com/NousResearch/hermes) agents living side by side on one
-machine. Every agent gets its own home, its own two-layer memory (Honcho +
-GBrain), a hardened "town-square" sandbox, and a launchd-managed gateway — and
+machine. Every agent gets its own home, its own persistent memory (GBrain), a
+hardened "town-square" sandbox, and a launchd-managed gateway — and
 `new-agent` builds one **correct from day one**, in a single command.
 
 ```sh
 cp superhermes.conf.example superhermes.conf   # set AGENTS_ROOT + carve-outs
-bin/new-agent --name Sky --camp personal --tier m
+bin/new-agent --name Sky --camp personal
 ```
 
 > This README is the source of truth for *how* an ideal agent is built. The
@@ -118,33 +118,27 @@ mode the fleet hit). Reload with `launchctl kickstart -k` (config change) or
 
 ### 4. Memory — two durable layers, each verified separately
 - **Bootstrap** — small, always-loaded `MEMORY.md` + `USER.md`. High-signal, tiny.
-- **Honcho** — peer/user memory + dialectic recall. Each agent runs its **own**
-  Dockerized stack (API + deriver + Postgres/pgvector + Redis), **auto-allocated
-  ports** (`DB = 5432 + (API−8000)`, `REDIS = 6379 + (API−8000)`). Wired via
-  `honcho.json`; the gateway auto-creates the workspace + `operator`/`<agent>`
-  peers. Runs a **3-tier model** (local Tier S / cloud Tier M / reasoning Tier L),
-  bounded per agent by a **ceiling** kept in one synced matrix.
 - **GBrain** — the semantic/wiki brain over the agent's markdown `vault/brain/`.
   Canonical, non-negotiable setup:
   - **Runtime:** `github:garrytan/gbrain` v0.41.x, installed *profile-isolated*
     into the agent's own `<profile>/home/.bun` (not the npm `gbrain@1.3.1` — that's
     an unrelated GPU library).
-  - **Store:** pglite at `<profile>/home/.gbrain/brain.pglite` (768-dim
-    `nomic-embed-text`). Never SQLite.
+  - **Store:** Postgres (`gbrain_<slug>` identity; agents may point at any
+    Postgres) with 768-dim `nomic-embed-text` embeddings. Never SQLite.
   - **Access:** the agent's **own** `<agent>/.local/bin/gbrain` wrapper (pins
-    `HOME`/`HERMES_HOME`/`BUN_INSTALL` and `OLLAMA_BASE_URL=…:11434/v1`).
+    `HOME`/`HERMES_HOME`/`BUN_INSTALL` and `OLLAMA_BASE_URL=…:11434/v1`
+    (deployments may override; e.g. a fleet-specific port)).
   - `config.json`, the MCP command, and the CLI wrapper **all resolve to one
     store** — this is what prevents the classic CLI↔MCP split-brain.
 
 Two daily baseline crons keep memory and identity durable:
 
 - **Memory maintenance** — one snapshot-fed LLM run. A read-only
-  `memory_health_snapshot` script injects *real* vault/GBrain/Honcho numbers as
+  `memory_health_snapshot` script injects *real* vault/GBrain numbers as
   context. The routine is scoped to the agent root, exposes only the file,
   terminal, session-search, and memory toolsets, and carries an eight-call
-  operating budget. It then **consolidates** — distils one bounded session result and
-  **harvests Honcho's durable distillate** (peer card → `honcho_search` →
-  optional dialectic synthesis) into the right *topical* GBrain pages,
+  operating budget. It then **consolidates** — distils one bounded session
+  result into the right *topical* GBrain pages,
   idempotently (read-before-write, never dated dumps) — and runs **hygiene**
   (scans both layers for poison, staleness, and CLI↔MCP split-brain).
 - **Identity git-sync** (runs just after) — a deterministic `no_agent` backup
@@ -186,18 +180,19 @@ fleet centralising on BitWarden run the *same* framework, no fork.
 An agent is "ideal" only if **all** of these hold:
 
 1. **Independent** — no cross-agent dependency in runtime, memory, or wrappers.
-2. **Own GBrain runtime** (v0.41, profile-isolated), pglite store, own wrapper, all
+2. **Own GBrain runtime** (v0.41, profile-isolated), Postgres store, own wrapper, all
    paths converging on one brain.
 3. **Town-square sandbox** with the three carve-outs; no `WRITE_SAFE_ROOT`.
 4. **No secrets in the repo** — they live only in the gitignored profile `.env` /
    local config, or a secrets manager. Never committed.
 5. **Approval gates on every real-world side effect** (email, messages, posts,
    purchases, deletions, credential changes).
-6. **Every layer independently verifiable** — Honcho `/health`, `gbrain stats` /
-   `health` (100% embed coverage), sandbox compiles, plist lints, config parses.
+6. **Every layer independently verifiable** — GBrain store reachable, `gbrain
+   stats` / `health` (100% embed coverage), sandbox compiles, plist lints,
+   config parses.
 7. **Each agent its own git repo** at its root, with a normalised default-deny
    `.gitignore` — only durable identity versioned; never secrets, caches, the
-   Honcho stack, the GBrain store, the vault, or workspace clones.
+   GBrain store, the vault, or workspace clones.
 
 `bin/verify-fleet` asserts all of these across a live fleet in one pass; the
 `tests/` suite locks down the shipping scripts.
@@ -207,7 +202,7 @@ An agent is "ideal" only if **all** of these hold:
 ## Build it
 
 ```sh
-bin/new-agent --name Sky --camp personal --tier m   # interactive: name · camp · tier · model
+bin/new-agent --name Sky --camp personal        # interactive: name · camp · model
 bin/new-agent --name Sky --dry-run                  # render to a temp dir, zero side effects
 bin/new-agent --name Sky --no-start                 # scaffold files only
 bin/new-agent --name Sky --provider xai-oauth --model grok-4.3 \
@@ -222,18 +217,18 @@ model. The model stays **operator-choice and fleet-agnostic**: fleet defaults (e
 a house provider) are layered on top by the fleet, not baked in here.
 
 The phases: directory skeleton → town-square sandbox (compile-checked) → Hermes
-profile (`config.yaml`, `honcho.json`, **SOUL seed**, MEMORY/USER, **`.env` secret
+profile (`config.yaml`, **SOUL seed**, MEMORY/USER, **`.env` secret
 keys**, **memory-maintenance + git-sync crons** (+ their scripts), **normalised root
 `.gitignore`**) → GBrain (own v0.41 runtime
-+ wrapper + pglite) → Honcho stack (compose + `.env` + backup, ports auto-allocated)
++ wrapper + Postgres)
 → launchd plists → **permissions + `git init`** (the agent's own repo at its root)
-→ services (Honcho up, GBrain installed + vault imported + embedded, gateway started).
+→ services (GBrain installed + vault imported + embedded, gateway started).
 
 Each agent is its **own git repo, rooted at `AGENTS_ROOT/<Name>/`**, with a
 **normalised** (not centralised) default-deny `.gitignore`: every agent follows
 the same standard, each keeps its own copy. Only the durable identity is versioned
 — config, soul, memory, crons, scripts, sandbox profile, README — never secrets,
-caches, the Honcho stack, the GBrain store, the knowledge vault (its own repo), or
+caches, the GBrain store, the knowledge vault (its own repo), or
 workspace clones. A new kind of secret file *cannot* leak: if it isn't allow-listed,
 it's ignored.
 
@@ -268,15 +263,13 @@ AGENTS_ROOT/<Name>/                    ← the agent's own git repo root
 │   ├── sandbox/<slug>.sb              town-square profile
 │   ├── profiles/<slug>/
 │   │   ├── config.yaml               provider, memory, skills, mcp_servers.gbrain
-│   │   ├── honcho.json               Honcho wiring (own port / workspace)
 │   │   ├── SOUL.md                   identity (the one personal file)
 │   │   ├── .env                      secret KEYS (Telegram/GitHub/Google; gitignored)
 │   │   ├── auth.json                 credentials (never committed)
 │   │   ├── cron/jobs.definition.json durable routine definitions (tracked)
 │   │   ├── cron/jobs.json            live scheduler state (ignored)
-│   │   ├── home/.gbrain/             canonical pglite store + config.json
+│   │   ├── home/.gbrain/             canonical Postgres store + config.json
 │   │   └── memories/{MEMORY,USER}.md bootstrap memory
-│   └── honcho/honcho/                Dockerized memory stack
 ├── .local/bin/gbrain                 own GBrain v0.41 wrapper
 ├── vault/brain/                      markdown knowledge → GBrain
 ├── .home/ .cache/ .npm/ tmp/         isolated runtime dirs
@@ -284,8 +277,9 @@ AGENTS_ROOT/<Name>/                    ← the agent's own git repo root
 ```
 
 ## Requirements
-macOS (`sandbox-exec` + launchd) · Docker (Honcho) · a Hermes install + Python
-venv · Bun (GBrain) · Ollama (local embeddings) · Python 3, `bash`.
+macOS (`sandbox-exec` + launchd) · a shared Hermes checkout + Python venv the
+deployment provides (not per-agent installs) · Bun (GBrain) · Ollama (local
+embeddings) · Python 3, `bash`.
 
 ## Documentation
 
@@ -294,7 +288,6 @@ The README is the overview; these go deeper:
 | Doc | Topic |
 |-----|-------|
 | [docs/building-agents.md](docs/building-agents.md) | profile layout, config baseline, toolsets & risk model, and the `new-agent` scaffolder |
-| [docs/memory-and-skills.md](docs/memory-and-skills.md) | the bootstrap + Honcho + GBrain memory stack, the canonical v0.41 GBrain build, and the skills layer |
 | [docs/operations.md](docs/operations.md) | cron & approval gates, operator modules, and housekeeping |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | the durable *why* behind every decision |
 | [examples/](examples/) | worked rundowns from a live agent (Jeeves) |

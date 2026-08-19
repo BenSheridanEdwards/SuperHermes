@@ -40,9 +40,9 @@ including legitimate work like maintaining the shared skills library or building
 apps — while adding no protection the OS sandbox doesn't already enforce. Friction
 with no upside.
 
-### 4. GBrain: one pglite store per agent, profile-isolated, own wrapper
+### 4. GBrain: one Postgres store per agent, profile-isolated, own wrapper
 **Decision.** Each agent installs its own GBrain runtime into its profile-home,
-keeps one pglite store, and points its `config.json`, MCP command, and CLI wrapper
+keeps one Postgres store, and points its `config.json`, MCP command, and CLI wrapper
 at that one store.
 
 **Why.** The SQLite + shared-wrapper era produced two failures at once: a
@@ -50,23 +50,23 @@ at that one store.
 diverged) and a **cross-agent dependency** (the shared wrapper). Convergence on one
 store kills the split-brain; profile isolation kills the dependency.
 
-### 5. Honcho: one stack per agent, tiered by workload, bounded by a ceiling
-**Decision.** Every agent runs its own Honcho stack. Models are chosen by *workload
-tier* (S local / M cloud / L reasoning), and each agent has a *ceiling* that bounds
-how far it climbs. Ceilings come from one synced matrix, never hand-edited per agent.
+### 5. The middle memory layer was removed
+**Decision.** The passive peer-learning layer (Honcho) was removed —
+decommissioned in the reference deployment on 2026-07-15. Two layers remain:
+session/state and the GBrain semantic store.
 
-**Why.** Cost and latency should land where they belong — extraction is cheap and
-local; deep reasoning is rare and expensive. Per-agent ceilings let a low-stakes
-agent stay fully local while a flagship reaches the reasoning tier. One matrix as
-source of truth prevents the per-file drift that hand-editing always produces.
+**Why.** A per-agent Dockerized stack that the agent never successfully read
+from was pure operational weight — containers, ports, backups, and tier
+matrices to keep healthy for no recall benefit. Fewer layers, each verified,
+beats more layers half-alive.
 
-### 6. Three memory layers, each with one job
-**Decision.** Bootstrap (`MEMORY.md`/`USER.md`, tiny, always-loaded) · Honcho
-(passive peer learning) · GBrain (curated knowledge). Don't duplicate across them.
+### 6. Two memory layers, each with one job
+**Decision.** Bootstrap (`MEMORY.md`/`USER.md`, tiny, always-loaded) · GBrain
+(curated knowledge). Don't duplicate across them.
 
 **Why.** Conflating them bloats always-loaded context and double-stores facts.
-Honcho learns *about the user* automatically; GBrain is what the agent *curates*;
-bootstrap is the handful of facts needed every turn. Distinct jobs, distinct stores.
+GBrain is what the agent *curates*; bootstrap is the handful of facts needed
+every turn. Distinct jobs, distinct stores.
 
 ### 7. Config is generated/synced from one source — never hand-edited per agent
 **Decision.** Per-agent config derives from templates and matrices, not manual edits.
@@ -74,6 +74,9 @@ bootstrap is the handful of facts needed every turn. Distinct jobs, distinct sto
 **Why.** Hand-edited fleets drift. A single audit found three different config
 schema versions, split GBrain stores, and a missing memory-wiring file — all
 silent. One source + a render/sync step makes drift structurally hard.
+
+Profiles carry a `_config_version` (the reference deployment is currently 33)
+migrated by Hermes's own migrate_config — never hand-edited.
 
 ### 8. A new agent is born inspired *and* safe
 **Decision.** `SOUL.md` starts as a seed ("a new soul with unlimited potential…
@@ -101,9 +104,9 @@ BitWarden, with no fork. Secrets are recoverable; a leaked secret in public git
 history is not.
 
 ### 10. Verify every layer independently — "looks set up" ≠ "works"
-**Decision.** Never report a layer healthy without its own evidence: Honcho
-`/health`, `gbrain stats`/`health` (embed coverage), sandbox compiles, plist lints,
-config parses.
+**Decision.** Never report a layer healthy without its own evidence: GBrain
+store reachability, `gbrain stats`/`health` (embed coverage), sandbox compiles,
+plist lints, config parses.
 
 **Why.** A `vault/brain/` folder proves markdown exists, not that GBrain indexes it.
 A running container isn't a healthy API. A present config file isn't a *loaded* one
