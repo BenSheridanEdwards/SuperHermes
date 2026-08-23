@@ -3,7 +3,9 @@
 # Own install (github:garrytan/gbrain in <profile>/home/.bun) — NO cross-agent
 # dependency, NO shared wrapper. Pins all resolution inside this agent.
 set -euo pipefail
-ROOT="__AGENT_ROOT__"
+# Derive root from this wrapper rather than baking the creation path: Fleet can move
+# an agent into a client-owned tree after provisioning without redirecting GBrain.
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 PROFILE="$ROOT/.hermes/profiles/__AGENT_SLUG__"
 export HERMES_HOME="$PROFILE"
 export HOME="$PROFILE/home"

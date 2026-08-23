@@ -110,6 +110,18 @@ pl="$(cat "$td/LaunchAgents/ai.hermes.gateway-testunit.plist" 2>/dev/null)"
 assert_has "$pl" "Shared/bin/hermes-gateway-launch" "gateway plist uses shared launcher"
 assert_hasnt "$pl" "hermes_cli.main"                "gateway plist does not bypass shared launcher"
 assert_has "$pl" "<string>testunit</string>"        "gateway plist passes slug to launcher"
+configured_soft_file_limit="$(python3 - "$td/LaunchAgents/ai.hermes.gateway-testunit.plist" <<'PY'
+import plistlib
+import sys
+
+with open(sys.argv[1], "rb") as property_list_file:
+    property_list = plistlib.load(property_list_file)
+print(property_list.get("SoftResourceLimits", {}).get("NumberOfFiles", 0))
+PY
+)"
+[ "$configured_soft_file_limit" -ge 4096 ] \
+  && ok "new gateway jobs have file-descriptor headroom" \
+  || bad "new gateway jobs must allow at least 4096 open files"
 configured_max_turns="$(python3 - "$td/TestUnit/.hermes/profiles/testunit/config.yaml" <<'PY'
 import re, sys
 text = open(sys.argv[1], encoding="utf-8").read()
@@ -241,6 +253,23 @@ assert_has "$mc" "default: claude-x"     "primary model from --model"
 assert_has "$mc" "provider: xai-oauth"   "fallback #1 from --fallback"
 assert_has "$mc" "provider: opencode-go" "fallback #2 from --fallback"
 assert_has "$mc" "round_robin"           "round-robin from --round-robin"
+
+# ---------------------------------------------------------------------------
+section "gbrain-wrapper.tmpl — derives its agent root after a profile move"
+T="$(mktemp -d)"; ROOT="$T/Agents/Clients/Jake/Hunter"; MOVED="$T/Agents/Clients/Moved/Hunter"
+mkdir -p "$ROOT/.local/bin"
+A_NAME="Jake's Hunter" A_SLUG=hunter A_ROOT="$ROOT" render "$REPO/templates/gbrain-wrapper.tmpl" > "$ROOT/.local/bin/gbrain"
+wrapper="$(cat "$ROOT/.local/bin/gbrain")"
+assert_hasnt "$wrapper" "$ROOT" "wrapper does not bake the original agent root"
+assert_hasnt "$wrapper" '__AGENT_ROOT__' "wrapper does not leave the root placeholder"
+mkdir -p "$(dirname "$MOVED")"
+mv "$ROOT" "$MOVED"
+# Observe ROOT after a move. Stub exec so the wrapper does not need bun/gbrain.
+sed -i.bak 's|^exec .*|printf %s "$ROOT"; exit 0|' "$MOVED/.local/bin/gbrain"
+chmod +x "$MOVED/.local/bin/gbrain"
+resolved="$("$MOVED/.local/bin/gbrain")"
+assert_eq "$resolved" "$MOVED" "moved wrapper resolves ROOT to the new agent tree"
+rm -rf "$T"
 
 # ---------------------------------------------------------------------------
 section "memory-health-snapshot.py.tmpl — parses + uses the OWN gbrain wrapper"
