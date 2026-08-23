@@ -72,7 +72,24 @@ def set_busy_input_mode(path: Path, mode: str) -> bool:
             index = busy_indexes[0]
             match = BUSY_MODE_KEY.match(lines[index])
             assert match is not None
-            lines[index] = f"{match.group('indent')}busy_input_mode: {mode}{match.group('suffix')}"
+            existing_value = match.group("value")
+            quote = ""
+            if (
+                len(existing_value) >= 2
+                and existing_value[0] in {"'", '"'}
+                and existing_value[-1] == existing_value[0]
+            ):
+                quote = existing_value[0]
+                scalar_value = existing_value[1:-1]
+            else:
+                scalar_value = existing_value
+            if scalar_value not in VALID_MODES:
+                raise ValueError("existing busy_input_mode must be a supported scalar mode")
+            replacement_value = f"{quote}{mode}{quote}"
+            lines[index] = (
+                f"{match.group('indent')}busy_input_mode: "
+                f"{replacement_value}{match.group('suffix')}"
+            )
         else:
             lines.insert(display_index + 1, f"  busy_input_mode: {mode}")
     else:

@@ -227,6 +227,18 @@ python3 "$REPO/bin/set-busy-input-mode" "$T/blank.yaml" steer >/dev/null 2>&1; r
 assert_eq "$rc" "2" "normalizer rejects blank busy-input values"
 cmp -s "$T/blank.before" "$T/blank.yaml"; rc=$?
 assert_eq "$rc" "0" "blank-value rejection leaves config byte-identical"
+
+cat > "$T/non-scalar.yaml" <<'YAML'
+display:
+  busy_input_mode: {interrupt}
+telegram:
+  bot_token: SECRET_REFERENCE
+YAML
+cp "$T/non-scalar.yaml" "$T/non-scalar.before"
+python3 "$REPO/bin/set-busy-input-mode" "$T/non-scalar.yaml" steer >/dev/null 2>&1; rc=$?
+assert_eq "$rc" "2" "normalizer rejects non-scalar busy-input values"
+cmp -s "$T/non-scalar.before" "$T/non-scalar.yaml"; rc=$?
+assert_eq "$rc" "0" "non-scalar rejection leaves config byte-identical"
 rm -rf "$T"
 
 # ---------------------------------------------------------------------------
