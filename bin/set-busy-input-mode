@@ -12,9 +12,13 @@ from pathlib import Path
 
 VALID_MODES = {"interrupt", "queue", "steer"}
 DISPLAY_HEADER = re.compile(r"^display:\s*(?:#.*)?$")
+ANY_DISPLAY_HEADER = re.compile(r"^(?:display|['\"]display['\"])\s*:")
 TOP_LEVEL_KEY = re.compile(r"^[^\s#][^:]*:")
 BUSY_MODE_KEY = re.compile(
     r"^(?P<indent>[ \t]+)busy_input_mode:\s*(?P<value>[^\s#]+)(?P<suffix>\s*(?:#.*)?)$"
+)
+ANY_BUSY_MODE_KEY = re.compile(
+    r"^[ \t]+(?:busy_input_mode|['\"]busy_input_mode['\"])\s*:"
 )
 
 
@@ -24,9 +28,21 @@ def set_busy_input_mode(path: Path, mode: str) -> bool:
     if path.is_symlink() or not path.is_file():
         raise ValueError(f"config must be a regular file: {path}")
 
-    original = path.read_text(encoding="utf-8")
+    original_bytes = path.read_bytes()
+    if original_bytes.startswith(b"\xef\xbb\xbf"):
+        raise ValueError("UTF-8 byte-order marks are unsupported")
+    if b"\r" in original_bytes:
+        raise ValueError("config must use LF line endings")
+    original = original_bytes.decode("utf-8")
     trailing_newline = original.endswith("\n")
     lines = original.splitlines()
+    unsupported_display_indexes = [
+        index
+        for index, line in enumerate(lines)
+        if ANY_DISPLAY_HEADER.match(line) and not DISPLAY_HEADER.match(line)
+    ]
+    if unsupported_display_indexes:
+        raise ValueError("display must use a top-level block mapping")
     display_indexes = [index for index, line in enumerate(lines) if DISPLAY_HEADER.match(line)]
     if len(display_indexes) > 1:
         raise ValueError("config contains more than one top-level display block")
@@ -38,11 +54,18 @@ def set_busy_input_mode(path: Path, mode: str) -> bool:
             if TOP_LEVEL_KEY.match(lines[index]):
                 block_end = index
                 break
+        any_busy_indexes = [
+            index
+            for index in range(display_index + 1, block_end)
+            if ANY_BUSY_MODE_KEY.match(lines[index])
+        ]
         busy_indexes = [
             index
             for index in range(display_index + 1, block_end)
             if BUSY_MODE_KEY.match(lines[index])
         ]
+        if len(any_busy_indexes) != len(busy_indexes):
+            raise ValueError("busy_input_mode must have a scalar value")
         if len(busy_indexes) > 1:
             raise ValueError("display block contains more than one busy_input_mode key")
         if busy_indexes:

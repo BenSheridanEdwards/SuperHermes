@@ -201,6 +201,32 @@ assert_has "$normalized" "busy_input_mode: steer" "clone interrupt mode becomes 
 assert_has "$normalized" "busy_ack_enabled: false" "clone normalizer preserves sibling display settings"
 assert_eq "$before_model" "$after_model" "clone normalizer preserves preceding config"
 assert_eq "$(printf '%s\n' "$normalized" | grep -c 'busy_input_mode:')" "1" "clone normalizer leaves one busy-input key"
+
+printf 'display:\r\n  busy_input_mode: interrupt\r\n' > "$T/crlf.yaml"
+cp "$T/crlf.yaml" "$T/crlf.before"
+python3 "$REPO/bin/set-busy-input-mode" "$T/crlf.yaml" steer >/dev/null 2>&1; rc=$?
+assert_eq "$rc" "2" "normalizer rejects CRLF instead of rewriting unrelated bytes"
+cmp -s "$T/crlf.before" "$T/crlf.yaml"; rc=$?
+assert_eq "$rc" "0" "CRLF rejection leaves config byte-identical"
+
+cat > "$T/inline.yaml" <<'YAML'
+display: {busy_input_mode: interrupt}
+YAML
+cp "$T/inline.yaml" "$T/inline.before"
+python3 "$REPO/bin/set-busy-input-mode" "$T/inline.yaml" steer >/dev/null 2>&1; rc=$?
+assert_eq "$rc" "2" "normalizer rejects unsupported inline display mappings"
+cmp -s "$T/inline.before" "$T/inline.yaml"; rc=$?
+assert_eq "$rc" "0" "inline display rejection leaves config byte-identical"
+
+cat > "$T/blank.yaml" <<'YAML'
+display:
+  busy_input_mode:
+YAML
+cp "$T/blank.yaml" "$T/blank.before"
+python3 "$REPO/bin/set-busy-input-mode" "$T/blank.yaml" steer >/dev/null 2>&1; rc=$?
+assert_eq "$rc" "2" "normalizer rejects blank busy-input values"
+cmp -s "$T/blank.before" "$T/blank.yaml"; rc=$?
+assert_eq "$rc" "0" "blank-value rejection leaves config byte-identical"
 rm -rf "$T"
 
 # ---------------------------------------------------------------------------
