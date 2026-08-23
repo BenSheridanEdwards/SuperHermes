@@ -111,11 +111,21 @@ assert_has "$pl" "Shared/bin/hermes-gateway-launch" "gateway plist uses shared l
 assert_hasnt "$pl" "hermes_cli.main"                "gateway plist does not bypass shared launcher"
 assert_has "$pl" "<string>testunit</string>"        "gateway plist passes slug to launcher"
 configured_max_turns="$(python3 - "$td/TestUnit/.hermes/profiles/testunit/config.yaml" <<'PY'
-import sys,yaml
-print(yaml.safe_load(open(sys.argv[1]))["agent"]["max_turns"])
+import re, sys
+text = open(sys.argv[1], encoding="utf-8").read()
+match = re.search(r"(?m)^agent:\s*\n(?:^[ \t]+.*\n)*?^[ \t]+max_turns:\s*([0-9]+)", text)
+print(match.group(1) if match else "")
 PY
 )"
 [ "$configured_max_turns" -le 24 ] && ok "new agents have a bounded model-turn budget" || bad "new agents must not inherit a 150-turn model budget"
+configured_busy_input_mode="$(python3 - "$td/TestUnit/.hermes/profiles/testunit/config.yaml" <<'PY'
+import re, sys
+text = open(sys.argv[1], encoding="utf-8").read()
+match = re.search(r"(?m)^display:\s*\n(?:^[ \t]+.*\n)*?^[ \t]+busy_input_mode:\s*([^\s#]+)", text)
+print(match.group(1) if match else "")
+PY
+)"
+assert_eq "$configured_busy_input_mode" "steer" "new agents steer busy Telegram follow-ups by default"
 python3 -m json.tool "$REPO/templates/agent-template.json" >/dev/null 2>&1 \
   && ok "agent template manifest parses" || bad "agent template manifest parses"
 AGENTS_ROOT=""; [ -f "$REPO/superhermes.conf" ] && . "$REPO/superhermes.conf" || . "$REPO/superhermes.conf.example"
@@ -154,6 +164,32 @@ assert_has "$mcg" "- serve" "gbrain MCP serves"
 assert_has "$mcg" "enabled: true" "gbrain MCP enabled"
 assert_has "$mcg" "HOME:" "gbrain MCP pins HOME"
 assert_has "$mcg" "HERMES_HOME:" "gbrain MCP pins HERMES_HOME"
+
+# ---------------------------------------------------------------------------
+section "set-busy-input-mode — clone configs normalize to steer without collateral edits"
+T="$(mktemp -d)"
+cat > "$T/config.yaml" <<'YAML'
+model:
+  provider: openai-codex
+  default: gpt-5.5
+
+display:
+  busy_input_mode: interrupt
+  busy_ack_enabled: false
+
+telegram:
+  enabled: true
+YAML
+before_model="$(python3 -c 'import sys; text=open(sys.argv[1]).read(); print(text.split("display:", 1)[0], end="")' "$T/config.yaml")"
+python3 "$REPO/bin/set-busy-input-mode" "$T/config.yaml" steer; rc=$?
+normalized="$(cat "$T/config.yaml")"
+after_model="$(python3 -c 'import sys; text=open(sys.argv[1]).read(); print(text.split("display:", 1)[0], end="")' "$T/config.yaml")"
+assert_eq "$rc" "0" "clone normalizer exits 0"
+assert_has "$normalized" "busy_input_mode: steer" "clone interrupt mode becomes steer"
+assert_has "$normalized" "busy_ack_enabled: false" "clone normalizer preserves sibling display settings"
+assert_eq "$before_model" "$after_model" "clone normalizer preserves preceding config"
+assert_eq "$(printf '%s\n' "$normalized" | grep -c 'busy_input_mode:')" "1" "clone normalizer leaves one busy-input key"
+rm -rf "$T"
 
 # ---------------------------------------------------------------------------
 section "ensure-gbrain-postgres — config-only writes fleet shape"

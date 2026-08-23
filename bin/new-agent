@@ -207,6 +207,9 @@ fi
 # blocks, preserving every other key. SuperHermes-owned helper (no Fleet dep).
 printf '%s\n' "$MODEL_BLOCK" | python3 "$REPO/bin/set-model-block" write "$PROFILE/config.yaml" || die "could not set model block"
 ok "model → ${MODEL_PROVIDER:-openai-codex}/${MODEL_NAME:-gpt-5.5}"
+python3 "$REPO/bin/set-busy-input-mode" "$PROFILE/config.yaml" steer \
+  || die "could not set busy input mode"
+ok "busy input → steer"
 # Named agents clone a Telegram-enabled reference (Neo). Gateway hard-fails
 # startup when telegram.enabled and no bot token (Reflect E2E 2026-07-25).
 # Leave messaging OFF until BotFather token is vault-wired; operators enable later.

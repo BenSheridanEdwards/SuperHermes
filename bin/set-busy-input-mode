@@ -1,0 +1,102 @@
+#!/usr/bin/env python3
+"""Set one top-level Hermes display.busy_input_mode value without YAML reserialization."""
+
+from __future__ import annotations
+
+import os
+import re
+import stat
+import sys
+import tempfile
+from pathlib import Path
+
+VALID_MODES = {"interrupt", "queue", "steer"}
+DISPLAY_HEADER = re.compile(r"^display:\s*(?:#.*)?$")
+TOP_LEVEL_KEY = re.compile(r"^[^\s#][^:]*:")
+BUSY_MODE_KEY = re.compile(
+    r"^(?P<indent>[ \t]+)busy_input_mode:\s*(?P<value>[^\s#]+)(?P<suffix>\s*(?:#.*)?)$"
+)
+
+
+def set_busy_input_mode(path: Path, mode: str) -> bool:
+    if mode not in VALID_MODES:
+        raise ValueError(f"mode must be one of: {', '.join(sorted(VALID_MODES))}")
+    if path.is_symlink() or not path.is_file():
+        raise ValueError(f"config must be a regular file: {path}")
+
+    original = path.read_text(encoding="utf-8")
+    trailing_newline = original.endswith("\n")
+    lines = original.splitlines()
+    display_indexes = [index for index, line in enumerate(lines) if DISPLAY_HEADER.match(line)]
+    if len(display_indexes) > 1:
+        raise ValueError("config contains more than one top-level display block")
+
+    if display_indexes:
+        display_index = display_indexes[0]
+        block_end = len(lines)
+        for index in range(display_index + 1, len(lines)):
+            if TOP_LEVEL_KEY.match(lines[index]):
+                block_end = index
+                break
+        busy_indexes = [
+            index
+            for index in range(display_index + 1, block_end)
+            if BUSY_MODE_KEY.match(lines[index])
+        ]
+        if len(busy_indexes) > 1:
+            raise ValueError("display block contains more than one busy_input_mode key")
+        if busy_indexes:
+            index = busy_indexes[0]
+            match = BUSY_MODE_KEY.match(lines[index])
+            assert match is not None
+            lines[index] = f"{match.group('indent')}busy_input_mode: {mode}{match.group('suffix')}"
+        else:
+            lines.insert(display_index + 1, f"  busy_input_mode: {mode}")
+    else:
+        if lines and lines[-1] != "":
+            lines.append("")
+        lines.extend(["display:", f"  busy_input_mode: {mode}"])
+
+    updated = "\n".join(lines) + ("\n" if trailing_newline or lines else "")
+    if updated == original:
+        return False
+
+    current_mode = stat.S_IMODE(path.stat().st_mode)
+    temporary_name = ""
+    try:
+        with tempfile.NamedTemporaryFile(
+            "w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            delete=False,
+        ) as temporary:
+            temporary.write(updated)
+            temporary.flush()
+            os.fsync(temporary.fileno())
+            temporary_name = temporary.name
+        os.chmod(temporary_name, current_mode)
+        os.replace(temporary_name, path)
+    finally:
+        if temporary_name:
+            try:
+                os.unlink(temporary_name)
+            except FileNotFoundError:
+                pass
+    return True
+
+
+def main(argv: list[str]) -> int:
+    if len(argv) != 3:
+        print(f"usage: {argv[0]} <config.yaml> <interrupt|queue|steer>", file=sys.stderr)
+        return 2
+    try:
+        set_busy_input_mode(Path(argv[1]), argv[2])
+    except (OSError, UnicodeError, ValueError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv))
