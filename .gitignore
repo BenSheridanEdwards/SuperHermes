@@ -11,5 +11,5 @@ __pycache__/
 *.local
 /tmp/
 
-# Fleet-internal worked examples (contain a specific agent's private setup)
+# Operator-internal worked examples (contain a specific agent's private setup)
 examples/

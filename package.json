@@ -1,7 +1,7 @@
 {
   "name": "superhermes",
   "version": "0.1.0",
-  "description": "Fleet-agnostic agent scaffolder and blueprint: one command births a self-contained Hermes agent (gateway, GBrain memory, sandbox, launchd, cron) on macOS.",
+  "description": "The template for the best version of a Hermes agent: one command births a complete, self-contained agent (gateway, GBrain memory, sandbox, launchd, cron) on macOS.",
   "license": "MIT",
   "author": "Ben Sheridan Edwards",
   "repository": {
@@ -25,7 +25,7 @@
   ],
   "bin": {
     "superhermes-new-agent": "bin/new-agent",
-    "superhermes-verify-fleet": "bin/verify-fleet",
+    "superhermes-verify-agents": "bin/verify-agents",
     "superhermes-ensure-gbrain-mcp": "bin/ensure-gbrain-mcp",
     "superhermes-ensure-gbrain-postgres": "bin/ensure-gbrain-postgres",
     "superhermes-set-busy-input-mode": "bin/set-busy-input-mode",

@@ -3,8 +3,8 @@
 # boot_agent_services(): shared "bring an agent's services online" sequence for
 # `bin/new-agent` (fresh full boot) and any caller that sources this file.
 #
-# Sequence: disk preflight → secret-file perms + fleet BWS token → GBrain
-# install + seed → launchd gateway → verify-fleet.
+# Sequence: disk preflight → secret-file perms + shared BWS token → GBrain
+# install + seed → launchd gateway → verify-agents.
 #
 # Honcho is not part of this path. Memory is GBrain only.
 #
@@ -13,7 +13,7 @@
 # Optional: API_PORT (unused; retained only if a caller still exports it)
 #
 # Best-effort per phase. Returns non-zero only on a preflight that makes
-# booting pointless (disk below floor). verify-fleet is the green gate.
+# booting pointless (disk below floor). verify-agents is the green gate.
 
 # 0.41.38.0 + stdio-stderr patch (fork of garrytan/gbrain@248fb7a9): routes
 # slog/console progress to stderr under `gbrain serve` so vault-import/embed
@@ -61,15 +61,20 @@ boot_agent_services() {
   if [ "${free_gb:-0}" -lt "$DISK_FLOOR_GB" ]; then warn "disk below floor: ${free_gb}GB < ${DISK_FLOOR_GB}GB"; return 1; fi
   ok "disk · ${free_gb}GB free"
 
-  say "services: secret perms + fleet token"
+  say "services: secret perms + shared token"
   chmod 600 "$PROFILE/.env" 2>/dev/null || true
   [ -f "$PROFILE/auth.json" ] && chmod 600 "$PROFILE/auth.json" 2>/dev/null || true
-  local bws; bws="$(grep -E '^BWS_ACCESS_TOKEN=' "$AGENTS_ROOT/.fleet.env" 2>/dev/null | head -1 | cut -d= -f2-)"
+  # SECRETS_ENV (operator config) points at the env file holding the shared
+  # secrets-manager reader token; unset = no shared token, per-agent .env only.
+  local bws=""
+  if [ -n "${SECRETS_ENV:-}" ]; then
+    bws="$(grep -E '^BWS_ACCESS_TOKEN=' "$SECRETS_ENV" 2>/dev/null | head -1 | cut -d= -f2-)"
+  fi
   if [ -n "$bws" ]; then
     launchctl setenv BWS_ACCESS_TOKEN "$bws" 2>/dev/null || true
     ok "secret-file perms tightened (.env 600) + BWS reader token asserted"
   else
-    warn "BWS_ACCESS_TOKEN not in $AGENTS_ROOT/.fleet.env — vault pull may fail"
+    warn "no BWS_ACCESS_TOKEN (set SECRETS_ENV to your token env file) — vault pull may fail"
   fi
 
   say "services: GBrain install + seed"
@@ -92,10 +97,10 @@ boot_agent_services() {
   launchctl enable "gui/$(id -u)/ai.hermes.gateway-$SLUG" 2>/dev/null || true
   launchctl start "gui/$(id -u)/ai.hermes.gateway-$SLUG" 2>/dev/null || true
   ok "gateway booted"
-  if python3 "$REPO/bin/verify-fleet" --agent "$NAME" --quiet 2>/dev/null; then
-    ok "verify-fleet: $NAME invariants pass"
+  if python3 "$REPO/bin/verify-agents" --agent "$NAME" --quiet 2>/dev/null; then
+    ok "verify-agents: $NAME invariants pass"
   else
-    warn "verify-fleet flagged issues for $NAME (run: $REPO/bin/verify-fleet --agent $NAME)"
+    warn "verify-agents flagged issues for $NAME (run: $REPO/bin/verify-agents --agent $NAME)"
   fi
 
   return 0

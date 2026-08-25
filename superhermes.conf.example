@@ -13,16 +13,30 @@ SKILLS_DIR="$AGENTS_ROOT/Shared/skills"
 # Python venv that runs the Hermes gateway.
 HERMES_VENV="$HOME/.hermes/hermes-agent/venv"
 
-# Optional: state JSON written by your fleet's runtime reconciler (the job that
+# Gateway launcher the generated launchd plist executes. SuperHermes deliberately
+# does not ship one: how a gateway boots (env loading, secret injection, logging)
+# is operator plumbing, not blueprint. Point this at your launcher script; an
+# orchestration layer sets it to its own.
+GATEWAY_LAUNCHER="$HOME/.local/bin/hermes-gateway-launch"
+
+# Optional: state JSON written by your deployment's runtime reconciler (the job that
 # proves gateway/store/backup health per agent), mapping agent ids →
 # {incident, healthy_at}. Agent ids may be bare slugs or namespaced "…:<slug>".
-# When set, verify-fleet asserts every agent is enrolled and healthy there.
+# When set, verify-agents asserts every agent is enrolled and healthy there.
 # Leave blank for a lone agent with no reconciler.
 RUNTIME_CONTRACT_STATE=""
 
 # Optional: clone a new agent's config.yaml/.env from an existing agent instead
 # of the bundled generic templates. Leave blank to use bundled templates.
 REF_AGENT=""
+
+# Optional: env file holding your shared secrets-manager reader token
+# (BWS_ACCESS_TOKEN=...). Unset = per-agent .env only, no shared token.
+SECRETS_ENV=""
+
+# Optional: admin Postgres URL used once at scaffold to CREATE ROLE/DATABASE for
+# the agent's GBrain store. Unset = try postgres@localhost, then $USER@localhost.
+GBRAIN_ADMIN_URL=""
 
 # Sandbox policy is intentionally not configurable here. Generated profiles use
 # allow-default and enforce only: no /Users/Shared access, no other macOS user

@@ -1,6 +1,6 @@
 ---
 name: create-agent
-description: "Build ONE correct, self-contained Hermes agent with SuperHermes's new-agent scaffolder — isolation, town-square sandbox, GBrain memory, baseline crons, and its own git repo. Stops at a verified, fleet-agnostic agent; joining a fleet is a separate layer."
+description: "Build ONE correct, self-contained Hermes agent with SuperHermes's new-agent scaffolder — isolation, town-square sandbox, GBrain memory, baseline crons, and its own git repo. Stops at a verified, self-contained agent; onboarding into any larger platform is a separate layer."
 category: agent-infrastructure-foundations
 tags: [superhermes, scaffold, new-agent, provisioning, agent-creation]
 version: 1.0.0
@@ -13,15 +13,15 @@ author: superhermes
 
 **Build one excellent, self-contained Hermes agent — correct from day one.** This
 skill is the operating manual for SuperHermes's `new-agent`. It produces a *complete*
-agent; it does **not** wire it into any particular fleet (remotes, shared tier
-matrix, shared secrets). That boundary is deliberate — fleet integration is a layer
-above, and keeping it out is what lets this stay open-source and fleet-agnostic.
+agent; it does **not** wire it into any orchestration platform (remotes, shared
+tier matrix, shared secrets). That boundary is deliberate — platform integration
+is a layer above, and keeping it out is what lets this stay open source.
 
-> **Scope contract.** Done = an agent that passes `verify-fleet --agent <Name>`
+> **Scope contract.** Done = an agent that passes `verify-agents --agent <Name>`
 > (0 fail). Output = a self-contained agent at `AGENTS_ROOT/<Name>/` with a running
-> gateway and GBrain. Memory is GBrain only. NOT yet a fleet member.
+> gateway and GBrain. Memory is GBrain only. Standalone by design.
 
-`REPO` below = the SuperHermes checkout (e.g. `/Users/agents/Projects/Fleet/shared/SuperHermes`).
+`REPO` below = the SuperHermes root (a git checkout, or `node_modules/superhermes` when installed from npm).
 
 ## 1. Preflight (don't skip — the scaffolder assumes these)
 - `superhermes.conf` exists (copy from `.example`) with `AGENTS_ROOT` + sandbox
@@ -60,12 +60,13 @@ The 7 phases: skeleton → town-square **sandbox** (compile-checked) → Hermes
 
 ## 5. Verify (the definition of done)
 ```sh
-"$REPO/bin/verify-fleet" --agent <Name>     # MUST be 0 fail
+"$REPO/bin/verify-agents" --agent <Name>     # MUST be 0 fail
 ```
 Checks: sandbox compiles · own GBrain wrapper + profile-isolated store · no stale
 shared-wrapper/LocalMem/retired-Honcho refs · cron scripts exist · normalised
 `.gitignore`, no secrets tracked · `KeepAlive: true` · baseline crons present.
 
-When this is green you have a **correct agent** — but an *island*. To make it a
-fleet member (off-machine backup, shared model tiers, shared secrets), hand it to
-the fleet's onboarding workflow. That is intentionally not this skill's job.
+When this is green you have a **correct agent** — standalone and complete. If an
+orchestration platform manages your agents (off-machine backup, shared model
+tiers, shared secrets), hand it to that platform's onboarding workflow. That is
+intentionally not this skill's job.

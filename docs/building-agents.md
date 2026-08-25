@@ -10,7 +10,7 @@ one command. For the *why* behind these choices see
 
 ## Profile layout
 
-A strong fleet agent is understandable at a glance:
+A strong agent is understandable at a glance:
 
 ```text
 $AGENTS_ROOT/<Agent>/                  ← the agent's own git repo root
@@ -103,7 +103,7 @@ sending is not.
 
 ## The `new-agent` scaffolder
 
-`bin/new-agent` spins up a complete fleet agent from one command, rendering the full
+`bin/new-agent` spins up a complete agent from one command, rendering the full
 anatomy above — correct from day one.
 
 ```sh
@@ -136,7 +136,7 @@ proceed confirm.
    its root + initial commit. Default-deny ignore means only durable identity is
    versioned. Then **services** (unless `--no-start`) — GBrain install + vault
    import + embed, health-gate, register + kickstart launchd.
-   The run finishes by calling [`verify-fleet`](../README.md#verify--test) on the new
+   The run finishes by calling [`verify-agents`](../README.md#verify--test) on the new
    agent.
 
 **Still manual by design** (scaffolded, then paused for values): **credentials**
