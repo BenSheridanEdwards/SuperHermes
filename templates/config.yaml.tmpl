@@ -1,6 +1,8 @@
-# Hermes agent config — generic SuperHermes baseline.
+# Hermes agent config — SuperHermes baseline.
 # Rendered by bin/new-agent; customize provider/model and the rest to taste.
-# Hermes fills sensible defaults for any key you omit.
+# Hermes fills sensible defaults for any key you omit. The values here are the
+# ones production agents proved load-bearing — defaults that are wrong for a
+# long-running autonomous agent are overridden explicitly.
 
 model:
   provider: openai-codex      # default shown by new-agent; pass --provider / answer the prompt to change
@@ -9,12 +11,24 @@ model:
 toolsets:
   - hermes-cli
 
+# A long-running agent needs headroom the interactive defaults don't give it.
 agent:
-  max_turns: 24
+  max_turns: 200              # the stock 24 strands real work mid-task
+  gateway_timeout: 3600
+  gateway_timeout_warning: 1800
+  gateway_notify_interval: 300
+  restart_drain_timeout: 180
+  api_max_retries: 5
+  reasoning_effort: medium
   tool_use_enforcement: auto
+
+goals:
+  max_turns: 80
 
 display:
   busy_input_mode: steer
+  interim_assistant_messages: false
+  show_reasoning: false
 
 terminal:
   backend: local
@@ -26,32 +40,219 @@ memory:
   memory_enabled: true
   user_profile_enabled: true
   provider: ""                # no external provider — semantic memory is GBrain (MCP server below)
+  memory_char_limit: 2200
+  user_char_limit: 4000
+
+# Context compression tuned for long sessions: compress earlier (0.4) and
+# harder (0.15) than stock, protect the working tail.
+compression:
+  threshold: 0.4
+  target_ratio: 0.15
+  protect_first_n: 3
+  protect_last_n: 20
+  hygiene_hard_message_limit: 400
+
+context:
+  engine: compressor
+
+# Auxiliary sub-agent routing. Every role defaults to the primary model; point
+# cheap, high-volume roles (compression, title_generation, session_search) at a
+# small model so they stop burning primary-model quota.
+auxiliary:
+  vision:
+    provider: __AUX_PROVIDER__
+    model: __AUX_MODEL__
+  web_extract:
+    provider: __AUX_PROVIDER__
+    model: __AUX_MODEL__
+  compression:
+    provider: __AUX_PROVIDER__
+    model: __AUX_MODEL__
+  skills_hub:
+    provider: __AUX_PROVIDER__
+    model: __AUX_MODEL__
+  approval:
+    provider: __AUX_PROVIDER__
+    model: __AUX_MODEL__
+  mcp:
+    provider: __AUX_PROVIDER__
+    model: __AUX_MODEL__
+  title_generation:
+    provider: __AUX_PROVIDER__
+    model: __AUX_MODEL__
+    timeout: 120
+  triage_specifier:
+    provider: __AUX_PROVIDER__
+    model: __AUX_MODEL__
+  curator:
+    provider: __AUX_PROVIDER__
+    model: __AUX_MODEL__
+  session_search:
+    provider: __AUX_PROVIDER__
+    model: __AUX_MODEL__
+    timeout: 120
+    max_concurrency: 3
+
+# Subagent spawning: bounded, and children never self-approve.
+delegation:
+  provider: __AUX_PROVIDER__
+  model: __AUX_MODEL__
+  max_iterations: 100
+  child_timeout_seconds: 3600
+  max_concurrent_children: 4
+  subagent_auto_approve: false
 
 skills:
   external_dirs:
     - __SKILLS_DIR__          # shared custom skills library
   template_vars: true
+  inline_shell: false
+
+# Skill-library GC: archive what goes stale, keep the library honest.
+curator:
+  stale_after_days: 7
+  archive_after_days: 14
+
+sessions:
+  auto_archive: true          # archive (reversible) — never auto-DELETE sessions
+  auto_archive_days: 7
 
 approvals:
   mode: smart
   cron_mode: deny             # no autonomous scheduled sends without approval
+  destructive_slash_confirm: false
+  smart_policy: |
+    Bias toward APPROVE for reversible work inside the agent's own home:
+    reading and listing any file, local git that neither rewrites shared
+    history nor destroys uncommitted work, dependency installs, deleting
+    caches/logs/build output/scratch dirs, and the agent editing its OWN
+    profile config or skills.
+    ESCALATE for: copying or transmitting credential material to a new
+    location or off this host; git push --force or any push to main;
+    deleting or overwriting paths outside the acting agent's own home and
+    outside your configured project roots; piping remote or decoded content
+    into a shell (curl|sh, base64 -d|sh); writes to /etc, /Library, /System,
+    or any LaunchAgents/LaunchDaemons plist.
+    Judgement rule: if the effect is recoverable — from git, a backup, or by
+    re-running — APPROVE. Reserve ESCALATE for irreversibility and
+    credential exfiltration.
+  # Hardline floor: these never run, whatever the mode above says.
+  deny:
+    - '*rm -rf /system*'
+    - '*rm -rf /library*'
+    - '*rm -rf /applications*'
+    - '*rm -rf /opt/homebrew*'
+    - '*rm -rf /users'
+    - '*rm -rf /users/*'
+    - '*rm -rf /private*'
+    - '*rm -rf /volumes*'
+    - '*dd *of=/dev/disk*'
+    - '*dd *of=/dev/rdisk*'
+    - '*> /dev/disk*'
+    - '*> /dev/rdisk*'
+    - '*diskutil erase*'
+    - '*diskutil reformat*'
+    - '*diskutil apfs delete*'
+    - '*csrutil disable*'
+    - '*spctl --master-disable*'
+    - '*tmutil delete*'
+    - '*tmutil disable*'
 
 code_execution:
   mode: project
 
-# Credentials are pulled automatically from Bitwarden Secrets Manager at startup
-# (the reader token lives in an env file your gateway launcher loads — operator
-# plumbing, outside this blueprint). This block makes a NEW agent auto-pull the
-# whole vault on day one — without it the agent starts with no creds.
+cron:
+  max_parallel_jobs: 2
+
+# Screen automation stays in the background — the agent never steals the
+# operator's screen or cursor.
+computer_use:
+  background_only: true
+  no_overlay: true
+
+# Anti-loop safety: warn when a tool keeps failing the same way.
+tool_loop_guardrails:
+  warnings_enabled: true
+  hard_stop_enabled: false
+  warn_after:
+    exact_failure: 2
+    same_tool_failure: 3
+    idempotent_no_progress: 2
+
+tool_output:
+  max_bytes: 50000
+  max_lines: 2000
+  max_line_length: 2000
+
+file_read_max_chars: 100000
+
+# Tool search hides rarely-used tools behind a search step; the keep list pins
+# the core so it never hides the tools every turn depends on.
+tools:
+  tool_search:
+    enabled: 'on'
+    threshold_pct: 10
+    keep:
+      - clarify
+      - delegate_task
+      - execute_code
+      - mcp__gbrain__get_health
+      - mcp__gbrain__get_stats
+      - mcp__gbrain__list_pages
+      - mcp__gbrain__search
+      - mcp_gbrain_get_page
+      - mcp_gbrain_list_pages
+      - mcp_gbrain_put_page
+      - mcp_gbrain_query
+      - mcp_gbrain_search
+      - memory
+      - patch
+      - process
+      - read_file
+      - search_files
+      - send_message
+      - session_search
+      - skill_view
+      - skills_list
+      - terminal
+      - todo
+      - vision_analyze
+      - web_extract
+      - web_search
+      - write_file
+
+streaming:
+  enabled: true
+  fresh_final_after_seconds: 60.0
+
+logging:
+  memory_monitor:
+    enabled: true
+    interval_seconds: 300
+
+prompt_caching:
+  cache_ttl: 5m
+
+# Headless agent: suppress interactive first-run prompts.
+onboarding:
+  seen:
+    busy_input_prompt: true
+    tool_progress_prompt: true
+
+# Secrets manager (optional). Disabled unless your superhermes.conf provides a
+# project id. Values come from your tenant; the reader token lives in an env
+# file your gateway launcher loads. NEVER inline tokens in this file — it is
+# tracked by the identity repo. That includes telegram.token: keys stay in the
+# profile .env.
 secrets:
   bitwarden:
-    enabled: true
+    enabled: __BWS_ENABLED__
     access_token_env: BWS_ACCESS_TOKEN
-    project_id: 5f892349-8f4b-42f6-81cb-b45a0109a796
+    project_id: '__BWS_PROJECT_ID__'
     cache_ttl_seconds: 300
     override_existing: true
     auto_install: true
-    server_url: https://vault.bitwarden.eu
+    server_url: '__BWS_SERVER_URL__'
 
 # Semantic/wiki brain (GBrain v0.41, profile-isolated). Each agent runs its OWN
 # runtime via its OWN wrapper — no shared/cross-agent dependency.
@@ -61,11 +262,13 @@ mcp_servers:
     args:
       - serve
     enabled: true
+    env:
+      OLLAMA_BASE_URL: http://127.0.0.1:11434/v1
 
 # Token-economics telemetry: log-only observer hooks (pre/post API request) that
 # attribute per-call tokens + real usage to $HERMES_HOME/logs/token_monitor.jsonl.
 # Generic, fail-open, latency-budgeted — useful for any agent; a deployment's
-# token_economics collector reads these into the HUD's TOKEN ECON tab. Plugins are
+# token_economics collector reads these into its own tooling. Plugins are
 # opt-in, so this is the agent's allowlist (add more as needed).
 plugins:
   enabled:
@@ -76,3 +279,5 @@ token_monitor:
   enabled: true
   sample_rate: 1.0
   headroom_sample_rate: 0.25
+
+_config_version: 33

@@ -1,0 +1,145 @@
+#!/usr/bin/env bash
+# Full restore archive for __AGENT_NAME__.
+#
+# git-sync backs up identity TEXT only. This is the other half: a zip that can
+# restore the running agent — a consistent SQLite copy of state.db (`.backup()`,
+# never a raw file copy of a live db), the profile minus caches, the vault, a
+# pg_dump of the GBrain store, the gateway plist, and the identity repo HEAD —
+# plus a generated RESTORE.md so future-you doesn't have to remember the steps.
+# Integrity-gated: the zip must pass `unzip -t` before rotation ever deletes an
+# older archive. The Hermes runtime itself is NOT in this zip.
+#
+# Config (superhermes.conf or env):
+#   BACKUP_DIR   destination root (default $HOME/Backups/hermes-agents)
+#   BACKUP_KEEP  archives to keep (default 3)
+set -euo pipefail
+
+DEST_ROOT="${BACKUP_DIR:-$HOME/Backups/hermes-agents}"
+KEEP="${BACKUP_KEEP:-3}"
+ROOT="${AGENT_BACKUP_ROOT:-__AGENT_ROOT__}"
+SLUG="__AGENT_SLUG__"
+PROFILE="$ROOT/.hermes/profiles/$SLUG"
+DEST="$DEST_ROOT/$SLUG"
+TS=$(date -u +%Y%m%dT%H%M%SZ)
+STAGING="${TMPDIR:-/tmp}/$SLUG-full-backup-$TS"
+ZIP="$DEST/$SLUG-full-$TS.zip"
+
+# Fail fast when the destination is an external volume whose data path is dead.
+# `[ -d ]` is a stat() call and stat() can succeed on a wedged volume; a real
+# write is the only honest probe, and 10s beats a hung backup.
+case "$DEST_ROOT" in
+  /Volumes/*)
+    probe="$DEST_ROOT/.backup-write-probe-$TS"
+    if ! (mkdir -p "$DEST_ROOT" && touch "$probe" && rm -f "$probe") 2>/dev/null; then
+      echo "backup failed: destination volume not writable: $DEST_ROOT" >&2
+      exit 1
+    fi ;;
+esac
+
+mkdir -p "$DEST" "$STAGING/$SLUG"
+cleanup() { chmod -R u+w "$STAGING" 2>/dev/null || true; rm -rf "$STAGING"; }
+trap cleanup EXIT
+
+# 1. state.db — consistent snapshot via the SQLite backup API.
+python3 - <<PY
+import sqlite3
+from pathlib import Path
+src = Path("$PROFILE/state.db")
+dst = Path("$STAGING/$SLUG/state.db")
+dst.parent.mkdir(parents=True, exist_ok=True)
+if src.exists():
+    s = sqlite3.connect(f"file:{src}?mode=ro", uri=True)
+    d = sqlite3.connect(str(dst))
+    s.backup(d)
+    d.close(); s.close()
+PY
+
+# 2. profile — identity, config, skills, crons; never caches or live db files.
+rsync -a \
+  --exclude 'logs/' \
+  --exclude 'audio_cache/' \
+  --exclude 'cache/' \
+  --exclude 'lsp/' \
+  --exclude 'state-snapshots/' \
+  --exclude 'home/.bun/' \
+  --exclude 'home/.cache/' \
+  --exclude 'home/.npm/' \
+  --exclude 'home/go/' \
+  --exclude 'home/.rustup/' \
+  --exclude 'home/.cargo/' \
+  --exclude 'home/Library/Caches/' \
+  --exclude 'home/Library/Python/' \
+  --exclude 'home/Library/Containers/' \
+  --exclude 'home/.local/share/uv/' \
+  --exclude 'node_modules/' \
+  --exclude 'cron/output/' \
+  --exclude '*.sock' \
+  --exclude '*.pyc' \
+  --exclude '__pycache__/' \
+  --exclude 'state.db' \
+  --exclude 'state.db-wal' \
+  --exclude 'state.db-shm' \
+  "$PROFILE/" "$STAGING/$SLUG/profile/"
+
+# 3. vault — the knowledge base (its own repo, but belt and braces).
+if [ -d "$ROOT/vault" ]; then
+  rsync -a --exclude '.gbrain/' --exclude 'node_modules/' "$ROOT/vault/" "$STAGING/$SLUG/vault/"
+fi
+
+# 4. gateway plist.
+PLIST="$HOME/Library/LaunchAgents/ai.hermes.gateway-$SLUG.plist"
+if [ -f "$PLIST" ]; then
+  mkdir -p "$STAGING/$SLUG/host"
+  cp "$PLIST" "$STAGING/$SLUG/host/"
+fi
+
+# 5. GBrain store dump (postgres engine; skips loudly, never fails the backup).
+mkdir -p "$STAGING/$SLUG/gbrain"
+DB_ID="$(python3 -c "import json,sys;print(json.load(open('$PROFILE/home/.gbrain/config.json')).get('database_url','').rsplit('/',1)[-1])" 2>/dev/null || true)"
+if [ -n "$DB_ID" ] && command -v pg_dump >/dev/null 2>&1; then
+  pg_dump --no-owner --format=custom \
+    --file="$STAGING/$SLUG/gbrain/$DB_ID.dump" \
+    "postgres://$DB_ID@localhost:5432/$DB_ID" \
+    || echo "gbrain dump skipped (pg_dump failed)" > "$STAGING/$SLUG/gbrain/SKIPPED.txt"
+else
+  echo "gbrain dump skipped (no postgres db or no pg_dump)" > "$STAGING/$SLUG/gbrain/SKIPPED.txt"
+fi
+
+# 6. identity repo pointer + restore instructions + manifest.
+git -C "$ROOT" rev-parse HEAD > "$STAGING/$SLUG/GIT_HEAD" 2>/dev/null || true
+
+cat > "$STAGING/$SLUG/RESTORE.md" <<EOF
+# Restore __AGENT_NAME__ from this zip
+
+Needed separately: a Hermes runtime and your gateway launcher (GATEWAY_LAUNCHER
+in superhermes.conf). Restore onto the same account/home or rewrite paths.
+
+1. Unzip somewhere safe (replace the live tree only when you mean it).
+2. Put \`profile/\` at \`$PROFILE/\`.
+3. Put \`vault/\` at \`$ROOT/vault/\`.
+4. Copy \`state.db\` into the profile root.
+5. Create Postgres role/db \`$DB_ID\` and \`pg_restore\` \`gbrain/$DB_ID.dump\`.
+6. Install \`host/ai.hermes.gateway-$SLUG.plist\` and kickstart the gateway.
+
+This zip includes auth.json and .env. Treat it as a secret. Never commit it.
+EOF
+
+{
+  echo "created_utc=$TS"
+  echo "git_head=$(cat "$STAGING/$SLUG/GIT_HEAD" 2>/dev/null || echo unknown)"
+  echo "profile=$PROFILE"
+  echo "dest=$ZIP"
+  echo "keep=$KEEP"
+  du -sh "$STAGING/$SLUG"/* 2>/dev/null || true
+} > "$STAGING/$SLUG/MANIFEST.txt"
+
+# 7. zip + integrity gate, then rotate.
+( cd "$STAGING" && /usr/bin/zip -rqy "$ZIP" "$SLUG" )
+[ -s "$ZIP" ] || { echo "backup failed: no zip"; exit 1; }
+unzip -t "$ZIP" >/dev/null || { echo "backup failed: zip integrity"; rm -f "$ZIP"; exit 1; }
+
+ls -1t "$DEST/$SLUG-full-"*.zip 2>/dev/null | tail -n +"$((KEEP + 1))" | while read -r old; do
+  rm -f "$old"
+done
+
+echo "backup ok $ZIP ($(du -h "$ZIP" | cut -f1))"

@@ -148,7 +148,7 @@ logging) is operator plumbing, deliberately outside the template.
   - `config.json`, the MCP command, and the CLI wrapper **all resolve to one
     store** — this is what prevents the classic CLI↔MCP split-brain.
 
-Two daily baseline crons keep memory and identity durable:
+Four baseline crons keep memory and identity durable:
 
 - **Memory maintenance** — one snapshot-fed LLM run. A read-only
   `memory_health_snapshot` script injects *real* vault/GBrain numbers as
@@ -160,10 +160,21 @@ Two daily baseline crons keep memory and identity durable:
   (scans both layers for poison, staleness, and CLI↔MCP split-brain).
 - **Identity git-sync** (runs just after) — a deterministic `no_agent` backup
   that commits the agent's durable identity to its own git repo behind a secret
-  tripwire. Kept *separate* from the LLM run on purpose: the backup must be the
-  one thing that always works, even on a day the maintenance run fails. Git
-  stores `jobs.definition.json`; Hermes owns the ignored `jobs.json`, so claims
-  and last-run timestamps cannot create identity-history churn.
+  tripwire, and pushes when a token is available (opt out with
+  `AGENT_GIT_SYNC_PUSH_APPROVED=0`). Kept *separate* from the LLM run on
+  purpose: the backup must be the one thing that always works, even on a day
+  the maintenance run fails. Git stores `jobs.definition.json`; Hermes owns the
+  ignored `jobs.json`, so claims and last-run timestamps cannot create
+  identity-history churn.
+- **GBrain autosync** (every 30 minutes, zero tokens) — `import --no-embed` +
+  `embed --stale`, so memory written this morning is retrievable this
+  afternoon instead of after the nightly run.
+- **Full restore backup** (daily, staggered per agent) — the other half
+  git-sync can't cover: a consistent SQLite snapshot of `state.db`, the
+  profile minus caches, the vault, a `pg_dump` of the GBrain store, the
+  gateway plist, and a generated `RESTORE.md` — in an integrity-gated,
+  rotated zip at `BACKUP_DIR`. Identity text can be re-cloned; this is what
+  brings a dead agent back.
 
 ### 5. Skills — shared procedural memory
 Repeatable workflows live once in a shared skills library; every agent's
@@ -280,6 +291,8 @@ AGENTS_ROOT/<Name>/                    ← the agent's own git repo root
 │   ├── profiles/<slug>/
 │   │   ├── config.yaml               provider, memory, skills, mcp_servers.gbrain
 │   │   ├── SOUL.md                   identity (the one personal file)
+│   │   ├── EVOLUTION.md              append-only self-modification log (what/why/watch-for)
+│   │   ├── DIARY.md                  reflection, no schema — written when there's something there
 │   │   ├── .env                      secret KEYS (Telegram/GitHub/Google; gitignored)
 │   │   ├── auth.json                 credentials (never committed)
 │   │   ├── cron/jobs.definition.json durable routine definitions (tracked)
@@ -287,7 +300,7 @@ AGENTS_ROOT/<Name>/                    ← the agent's own git repo root
 │   │   ├── home/.gbrain/             canonical Postgres store + config.json
 │   │   └── memories/{MEMORY,USER}.md bootstrap memory
 ├── .local/bin/gbrain                 own GBrain v0.41 wrapper
-├── vault/brain/                      markdown knowledge → GBrain
+├── vault/brain/                      markdown knowledge → GBrain (scaffolded taxonomy + HOME.md index)
 ├── .home/ .cache/ .npm/ tmp/         isolated runtime dirs
 └── workspace/                        working directory
 ```

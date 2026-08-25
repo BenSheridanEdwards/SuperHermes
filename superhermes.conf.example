@@ -38,6 +38,19 @@ SECRETS_ENV=""
 # the agent's GBrain store. Unset = try postgres@localhost, then $USER@localhost.
 GBRAIN_ADMIN_URL=""
 
+# Daily full-restore backups (state.db snapshot + profile + vault + GBrain dump,
+# integrity-gated zip, rotated). Each agent's cron minute is staggered
+# automatically. Point BACKUP_DIR at a different disk than the agents when you
+# can — a backup on the failing disk is not a backup.
+BACKUP_DIR="$HOME/Backups/hermes-agents"
+BACKUP_KEEP="3"
+
+# Optional: Bitwarden Secrets Manager tenant. When BWS_PROJECT_ID is set, new
+# agents render `secrets.bitwarden.enabled: true` and auto-pull the vault on
+# day one (reader token comes via SECRETS_ENV above). Unset = block disabled.
+BWS_PROJECT_ID=""
+BWS_SERVER_URL="https://vault.bitwarden.com"
+
 # Sandbox policy is intentionally not configurable here. Generated profiles use
 # allow-default and enforce only: no /Users/Shared access, no other macOS user
 # homes, and no writes into another agent root under AGENTS_ROOT.

@@ -1,0 +1,39 @@
+#!/bin/sh
+# gBrain autosync — import __AGENT_NAME__'s vault/brain into its profile-local
+# GBrain store and embed whatever went stale. Zero model tokens; keeps memory
+# written this morning retrievable this afternoon instead of after the nightly
+# maintenance run. A single transient store failure is retried; persistent
+# failures stay visible in the log and the exit code.
+set -u
+
+ROOT="${AGENT_GBRAIN_ROOT:-__AGENT_ROOT__}"
+WRAP="$ROOT/.local/bin/gbrain"
+BRAIN="$ROOT/vault/brain"
+LOG_DIR="${GBRAIN_AUTOSYNC_LOG_DIR:-$ROOT/.hermes/profiles/__AGENT_SLUG__/logs}"
+LOG="$LOG_DIR/gbrain-autosync.log"
+RETRY_DELAY_SECONDS="${GBRAIN_AUTOSYNC_RETRY_DELAY_SECONDS:-2}"
+MAX_ATTEMPTS=2
+export PATH="/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin"
+
+mkdir -p "$LOG_DIR" || exit 1
+# Silent no-op when the anatomy isn't there yet — never a red herring in cron.
+[ -x "$WRAP" ] || { echo "$(date -u +%FT%TZ) no wrapper at $WRAP" >>"$LOG"; exit 0; }
+[ -d "$BRAIN" ] || { echo "$(date -u +%FT%TZ) no brain dir at $BRAIN" >>"$LOG"; exit 0; }
+
+attempt=1
+rc=1
+echo "=== $(date -u +%FT%TZ) autosync ===" >>"$LOG"
+while [ "$attempt" -le "$MAX_ATTEMPTS" ]; do
+  {
+    "$WRAP" import "$BRAIN" --no-embed && "$WRAP" embed --stale
+  } >>"$LOG" 2>&1
+  rc=$?
+  [ "$rc" -eq 0 ] && break
+  [ "$attempt" -ge "$MAX_ATTEMPTS" ] && break
+  echo "=== $(date -u +%FT%TZ) attempt $attempt/$MAX_ATTEMPTS failed (rc=$rc); retrying ===" >>"$LOG"
+  sleep "$RETRY_DELAY_SECONDS"
+  attempt=$((attempt + 1))
+done
+
+echo "=== $(date -u +%FT%TZ) done (rc=$rc, attempts=$attempt) ===" >>"$LOG"
+exit "$rc"

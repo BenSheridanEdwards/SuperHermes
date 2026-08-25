@@ -63,8 +63,10 @@ if grep -qE 'push .*(--force|-f)\b' sync.sh; then bad "rendered script never for
 if grep -qE 'if (! )?git push -q origin' sync.sh; then bad "rendered script never bare-pushes first"; else ok "rendered script never bare-pushes first"; fi
 assert_has "$(cat sync.sh)" 'extraheader=AUTHORIZATION' "rendered script uses HTTPS auth header push"
 assert_has "$(cat sync.sh)" 'GH_TOKEN' "rendered script accepts GH_TOKEN from the environment"
-assert_has "$(cat sync.sh)" 'AGENT_GIT_SYNC_PUSH_APPROVED:-0' "SuperHermes standing default withholds push"
-assert_hasnt "$(cat sync.sh)" 'AGENT_GIT_SYNC_PUSH_APPROVED:-1' "SuperHermes template is not push-on default"
+# Push-on default: Chief standing approval 2026-07-17, shipped 2026-08-25.
+# Without a token it still only commits locally and says so — never hangs.
+assert_has "$(cat sync.sh)" 'AGENT_GIT_SYNC_PUSH_APPROVED:-1' "SuperHermes default pushes when a token is available"
+assert_hasnt "$(cat sync.sh)" 'AGENT_GIT_SYNC_PUSH_APPROVED:-0' "withhold-by-default is gone (opt out via =0)"
 assert_hasnt "$(cat sync.sh)" '/Users/agents/' "SuperHermes template stays free of machine-specific home paths"
 assert_has "$(cat sync.sh)" 'Camp-specific secret plumbing' "template documents deployment overlay boundary"
 if bash -n sync.sh; then ok "rendered script bash -n clean"; else bad "rendered script bash -n clean"; fi
@@ -109,6 +111,32 @@ assert_has "$out" "git initialised at root"  "initialises git at root"
 assert_has "$out" "memory-maintenance"        "renders memory-maintenance cron"
 assert_has "$out" "DRY-RUN complete"         "completes cleanly"
 td="$(printf '%s' "$out" | python3 -c "import sys,re;t=re.sub(r'\x1b\[[0-9;]*m','',sys.stdin.read());m=re.search(r'dry-run . (\S+)',t);print(m.group(1) if m else '')")"
+# Production-proven anatomy: brain taxonomy + identity docs + operational scripts.
+TU="$td/TestUnit"
+for want in vault/brain/HOME.md vault/brain/README.md vault/brain/continuity \
+            vault/brain/architecture vault/brain/conversations \
+            workspace/repos workspace/worktrees \
+            .hermes/profiles/testunit/EVOLUTION.md .hermes/profiles/testunit/DIARY.md; do
+  [ -e "$TU/$want" ] && ok "scaffolds $want" || bad "scaffolds $want"
+done
+assert_has "$(cat "$TU/vault/brain/HOME.md")" "PRIMARY SUBJECT" "brain HOME carries the filing rule"
+for scr in gbrain-autosync.sh full-backup.sh; do
+  s="$TU/.hermes/profiles/testunit/scripts/$scr"
+  [ -x "$s" ] && bash -n "$s" && ok "renders executable $scr (bash -n clean)" || bad "renders executable $scr (bash -n clean)"
+done
+assert_has "$(cat "$TU/.hermes/profiles/testunit/scripts/full-backup.sh")" 'unzip -t' "full-backup is integrity-gated"
+assert_hasnt "$(cat "$TU/.hermes/profiles/testunit/cron/jobs.json")" '__BACKUP_MINUTE__' "backup cron minute is substituted (staggered)"
+cfgchk="$(python3 - "$TU/.hermes/profiles/testunit/config.yaml" <<'PY'
+import sys
+text = open(sys.argv[1]).read()
+print("AUX_OK" if "__AUX_PROVIDER__" not in text and "auxiliary:" in text else "AUX_BAD")
+print("BWS_OK" if "__BWS_" not in text else "BWS_BAD")
+print("DENY_OK" if "csrutil disable" in text else "DENY_BAD")
+PY
+)"
+assert_has "$cfgchk" "AUX_OK" "config renders auxiliary routing with substituted models"
+assert_has "$cfgchk" "BWS_OK" "secrets manager stays disabled without an operator project id"
+assert_has "$cfgchk" "DENY_OK" "config carries the hardline deny floor"
 pl="$(cat "$td/LaunchAgents/ai.hermes.gateway-testunit.plist" 2>/dev/null)"
 assert_has "$pl" "hermes-gateway-launch" "gateway plist launches via the operator's gateway launcher"
 assert_hasnt "$pl" "hermes_cli.main"                "gateway plist does not bypass shared launcher"
@@ -132,7 +160,7 @@ match = re.search(r"(?m)^agent:\s*\n(?:^[ \t]+.*\n)*?^[ \t]+max_turns:\s*([0-9]+
 print(match.group(1) if match else "")
 PY
 )"
-[ "$configured_max_turns" -le 24 ] && ok "new agents have a bounded model-turn budget" || bad "new agents must not inherit a 150-turn model budget"
+[ "$configured_max_turns" = "200" ] && ok "new agents get the long-run 200-turn budget" || bad "new agents get the long-run 200-turn budget — got $configured_max_turns"
 configured_busy_input_mode="$(python3 - "$td/TestUnit/.hermes/profiles/testunit/config.yaml" <<'PY'
 import re, sys
 text = open(sys.argv[1], encoding="utf-8").read()
@@ -417,7 +445,7 @@ mkdir -p "$PROFILE/cron" "$PROFILE/scripts"
 A_NAME=Test A_SLUG=test A_ROOT="$ROOT" render "$REPO/templates/gitignore.tmpl" \
   | sed 's#jobs.definition.json#jobs.json#' > "$ROOT/.gitignore"
 printf '{"jobs":[{"id":"memory","name":"Daily memory maintenance","prompt":"unbounded","skill":"memory-architecture","script":"memory_health_snapshot.py","schedule":{"kind":"cron","expr":"0 23 * * *"},"enabled":true},{"id":"daily","name":"Daily identity git-sync","script":"git-sync.sh","no_agent":true,"schedule":{"kind":"cron","expr":"0 0 * * *"},"enabled":true,"last_run_at":"2026-07-11T00:00:00Z","last_status":"ok"}],"updated_at":"runtime"}\n' > "$PROFILE/cron/jobs.json"
-printf 'agent:\n  max_turns: 150\n' > "$PROFILE/config.yaml"
+printf 'agent:\n  max_turns: 500\n' > "$PROFILE/config.yaml"
 printf 'legacy sync\n' > "$PROFILE/scripts/git-sync.sh"
 git -C "$ROOT" init -q
 git -C "$ROOT" add -A
@@ -429,7 +457,7 @@ assert_has "$tracked" ".hermes/profiles/test/cron/jobs.definition.json" "migrati
 assert_hasnt "$tracked" ".hermes/profiles/test/cron/jobs.json" "migration untracks live registry"
 assert_has "$(cat "$ROOT/.gitignore")" "jobs.definition.json" "migration updates gitignore"
 assert_has "$(cat "$PROFILE/scripts/git-sync.sh")" "cron_registry_snapshot.py" "migration installs snapshot-aware git-sync"
-assert_has "$(cat "$PROFILE/config.yaml")" "max_turns: 24" "migration bounds existing agent model turns"
+assert_has "$(cat "$PROFILE/config.yaml")" "max_turns: 200" "migration bounds runaway model-turn budgets to 200"
 assert_has "$(cat "$PROFILE/cron/jobs.definition.json")" '"workdir": "'"$ROOT"'"' "migration scopes memory maintenance to the agent root"
 assert_has "$(cat "$PROFILE/cron/jobs.definition.json")" 'at most 8 model calls' "migration bounds memory maintenance model calls"
 [ -x "$PROFILE/scripts/cron_registry_snapshot.py" ] && ok "migration installs executable snapshot helper" || bad "migration installs executable snapshot helper"
@@ -442,7 +470,7 @@ rm -rf "$T"
 # ---------------------------------------------------------------------------
 section "cron-jobs.json.tmpl — renders valid, maintenance is snapshot-fed, git-sync standalone"
 T="$(mktemp -d)"
-AGENT_NAME=Probe AGENT_ROOT=/tmp/Probe MAINT_ID=m SYNC_ID=s NOW=n \
+AGENT_NAME=Probe AGENT_ROOT=/tmp/Probe MAINT_ID=m SYNC_ID=s AUTOSYNC_ID=a BACKUP_ID=b BACKUP_MINUTE=17 NOW=n \
   python3 -c "import os,re,sys;print(re.sub(r'__([A-Z_]+)__',lambda m:os.environ.get(m.group(1),m.group(0)),open(sys.argv[1]).read()),end='')" \
   "$REPO/templates/cron-jobs.json.tmpl" > "$T/jobs.json"
 chk="$(python3 - "$T/jobs.json" <<'PY'
@@ -450,14 +478,20 @@ import json,sys
 j=json.load(open(sys.argv[1]))["jobs"]
 m=next((x for x in j if x["name"]=="Daily memory maintenance"),{})
 g=next((x for x in j if x.get("script")=="git-sync.sh"),{})
-print("VALID" if len(j)==2 else "BADCOUNT")
+a=next((x for x in j if x.get("script")=="gbrain-autosync.sh"),{})
+b=next((x for x in j if x.get("script")=="full-backup.sh"),{})
+print("VALID" if len(j)==4 else "BADCOUNT")
+print("AUTOSYNC_OK" if a.get("no_agent") is True and a.get("schedule",{}).get("expr")=="*/30 * * * *" else "AUTOSYNC_BAD")
+print("BACKUP_OK" if b.get("no_agent") is True and b.get("schedule",{}).get("expr")=="17 3 * * *" else "BACKUP_BAD")
 print("MAINT_OK" if m.get("script")=="memory_health_snapshot.py" and m.get("skill")=="memory-architecture" and not m.get("no_agent") else "MAINT_BAD")
 print("MAINT_SCOPED" if m.get("workdir")=="/tmp/Probe" and m.get("enabled_toolsets")==["file","terminal","session_search","memory"] else "MAINT_UNSCOPED")
 print("MAINT_BOUNDED" if "one session_search discovery with limit=1" in m.get("prompt","") and "at most 8 model calls" in m.get("prompt","") else "MAINT_UNBOUNDED")
 print("SYNC_OK" if g.get("no_agent") is True else "SYNC_BAD")
 PY
 )"
-assert_has "$chk" "VALID"     "renders exactly 2 jobs"
+assert_has "$chk" "VALID"     "renders exactly 4 jobs"
+assert_has "$chk" "AUTOSYNC_OK" "gbrain autosync = no_agent every 30m"
+assert_has "$chk" "BACKUP_OK"   "full backup = no_agent daily at the staggered minute"
 assert_has "$chk" "MAINT_OK"  "maintenance = script(snapshot)+skill, LLM job"
 assert_has "$chk" "MAINT_SCOPED" "maintenance is restricted to its agent root and necessary toolsets"
 assert_has "$chk" "MAINT_BOUNDED" "maintenance prompt carries explicit retrieval and model-call budgets"

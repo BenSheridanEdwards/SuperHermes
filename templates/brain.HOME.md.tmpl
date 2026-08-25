@@ -1,0 +1,46 @@
+---
+title: __AGENT_NAME__ Brain — HOME
+type: guide
+tags: [brain, index, home]
+---
+
+# __AGENT_NAME__ Brain — HOME
+
+The index of the curated markdown memory layer. Keep this page current: it is
+the first thing retrieval finds and the map future-you navigates by.
+
+## Structure
+
+```
+vault/brain/
+├── architecture/    system designs, how things fit together
+├── companies/       organisations, products, vendors
+├── concepts/        mental models, frameworks
+├── continuity/      machine-maintained status pages (capture health, etc.)
+├── conversations/   distilled outcomes of important exchanges
+├── daily/           date-keyed notes, consolidated nightly
+├── guides/          runbooks, how-tos
+├── meetings/        meeting outcomes and decisions
+├── people/          contacts, collaborators
+├── projects/        multi-session work arcs
+├── sources/         provenance for imported material
+└── tech/            technical references
+```
+
+## Filing rules
+
+- File by **PRIMARY SUBJECT**, not format or source. A meeting about Project X
+  updates `projects/project-x.md`, not a new meetings page.
+- **Cross-link compulsively** with `[[wiki-links]]` — links are what make the
+  brain a graph instead of a pile.
+- Update pages **in place**; never create dated dump pages outside `daily/`.
+- Frontmatter on every page: `title`, `type`, `date`, `tags`.
+- No secrets, no PII beyond what the work needs, no raw transcripts.
+
+## Memory stack
+
+| Layer | Where | Job |
+|-------|-------|-----|
+| Bootstrap | `memories/MEMORY.md` + `USER.md` | always-loaded compact facts |
+| Semantic brain | this directory via GBrain | searchable knowledge base |
+| Daily notes | `daily/` | working memory, consolidated nightly |

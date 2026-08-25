@@ -1,9 +1,26 @@
-# __AGENT_NAME__ Workspace
+# __AGENT_NAME__ workspace
 
-Scratch and active project work for __AGENT_NAME__.
+Local working area for __AGENT_NAME__. This directory is operational state, not
+a product repository, and it is intentionally excluded from the identity repo.
+Durable knowledge belongs in `../vault`; curated semantic memory in
+`../vault/brain`.
 
-Keep third-party clones, temporary builds, experiments, and generated working
-trees here. Durable knowledge belongs in `../vault`, and curated semantic memory
-belongs in `../vault/brain`.
+## Stable buckets
 
-This workspace is intentionally excluded from the agent identity repo.
+- `repos/`: long-lived project checkouts.
+- `worktrees/`: per-task git worktrees — one change, one worktree.
+- `artifacts/`: screenshots, audio, benchmarks, and other generated evidence worth retaining.
+- `notes/`: planning notes and handoffs that do not belong in a product repository.
+- `scratch/`: bounded experiments; disposable.
+- `tmp/`: disposable turn-level output.
+
+## Rules
+
+1. One change, one worktree under `worktrees/`. Never edit shared or
+   runtime-sealed checkouts in place.
+2. Keep `tmp/` and `scratch/` disposable. Preserve useful proof under
+   `artifacts/` or `notes/` before cleanup.
+3. Do not treat dirty repositories, ahead branches, or detached reviews as
+   junk — they may be in-flight work.
+4. Credentials, runtime profiles, sessions, logs, and model caches never
+   belong here.
