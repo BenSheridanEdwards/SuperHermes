@@ -43,10 +43,14 @@ TR="$(git ls-files)"
 for want in .hermes/profiles/test/config.yaml .hermes/profiles/test/SOUL.md \
             .hermes/profiles/test/memories/MEMORY.md \
             .hermes/profiles/test/cron/jobs.definition.json \
+            .hermes/profiles/test/skills/x/SKILL.md \
+            vault/brain/n.md \
             .hermes/sandbox/test.sb README.md; do assert_has "$TR" "$want" "tracks $want"; done
 assert_hasnt "$TR" "honcho.json" "excludes retired honcho.json (Honcho decommissioned)"
 assert_hasnt "$TR" ".hermes/profiles/test/cron/jobs.json" "excludes volatile cron runtime registry"
-for deny in .env auth.json google_token.json vault/ workspace/ honcho/honcho .pglite skills/; do
+# Entire-vault canon (Chief decision 2026-08-06): vault/ and profile skills/ are
+# tracked identity; secrets, runtime homes, and workspace clones stay out.
+for deny in .env auth.json google_token.json workspace/ honcho/honcho .pglite; do
   assert_hasnt "$TR" "$deny" "excludes $deny"; done
 cd "$REPO"; rm -rf "$T"
 
@@ -107,7 +111,7 @@ assert_has "$out" "memory-maintenance"        "renders memory-maintenance cron"
 assert_has "$out" "DRY-RUN complete"         "completes cleanly"
 td="$(printf '%s' "$out" | python3 -c "import sys,re;t=re.sub(r'\x1b\[[0-9;]*m','',sys.stdin.read());m=re.search(r'dry-run . (\S+)',t);print(m.group(1) if m else '')")"
 pl="$(cat "$td/LaunchAgents/ai.hermes.gateway-testunit.plist" 2>/dev/null)"
-assert_has "$pl" "shared/bin/hermes-gateway-launch" "gateway plist uses shared launcher"
+assert_has "$pl" ".fleet/bin/hermes-gateway-launch" "gateway plist uses the fleet launcher"
 assert_hasnt "$pl" "hermes_cli.main"                "gateway plist does not bypass shared launcher"
 assert_has "$pl" "<string>testunit</string>"        "gateway plist passes slug to launcher"
 configured_soft_file_limit="$(python3 - "$td/LaunchAgents/ai.hermes.gateway-testunit.plist" <<'PY'
