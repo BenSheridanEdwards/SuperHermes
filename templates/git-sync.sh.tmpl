@@ -12,9 +12,9 @@
 #
 # Properties:
 #   • Idempotent — no diff → no commit, no noise.
-#   • Safe in unattended cron — NEVER pushes to GitHub by default. Set
-#     AGENT_GIT_SYNC_PUSH_APPROVED=1 only when a token is also available.
-#     It never force-pushes.
+#   • Pushes by default when a token is available (set
+#     AGENT_GIT_SYNC_PUSH_APPROVED=0 to hold pushes for manual approval).
+#     It never force-pushes, and without a token it commits locally and says so.
 #   • Fails closed on a suspected secret pasted into a tracked file.
 #   • Never bare `git push` first — non-interactive hosts often hang on the
 #     credential helper (scar 2026-08-06). Push only via env token + HTTPS header.
@@ -69,7 +69,7 @@ fi
 
 push_if_approved() {
   git remote get-url origin >/dev/null 2>&1 || return 0
-  if [ "${AGENT_GIT_SYNC_PUSH_APPROVED:-0}" != "1" ]; then
+  if [ "${AGENT_GIT_SYNC_PUSH_APPROVED:-1}" != "1" ]; then
     echo "$NAME git-sync: committed locally; GitHub push withheld pending approval - run: AGENT_GIT_SYNC_PUSH_APPROVED=1 $0"
     return 0
   fi
@@ -99,7 +99,7 @@ push_if_approved() {
 git add -A
 
 if git diff --cached --quiet; then
-  if [ "${AGENT_GIT_SYNC_PUSH_APPROVED:-0}" = "1" ]; then
+  if [ "${AGENT_GIT_SYNC_PUSH_APPROVED:-1}" = "1" ]; then
     push_if_approved
   fi
   exit 0

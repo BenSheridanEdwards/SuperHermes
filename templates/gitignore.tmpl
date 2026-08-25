@@ -47,6 +47,9 @@
 !/.hermes/profiles/__AGENT_SLUG__/config.yaml
 !/.hermes/profiles/__AGENT_SLUG__/repos.yaml
 !/.hermes/profiles/__AGENT_SLUG__/SOUL.md
+!/.hermes/profiles/__AGENT_SLUG__/EVOLUTION.md
+!/.hermes/profiles/__AGENT_SLUG__/DIARY.md
+!/.hermes/profiles/__AGENT_SLUG__/TODO.md
 !/.hermes/profiles/__AGENT_SLUG__/memories/
 !/.hermes/profiles/__AGENT_SLUG__/memories/*.md
 !/.hermes/profiles/__AGENT_SLUG__/cron/
@@ -231,6 +234,11 @@
 /vault/**/*.pid
 /vault/**/.DS_Store
 /vault/**/*.bak*
+
+# Raw export streams and bulk dumps stay local even under the tracked vault
+/vault/**/*.jsonl
+/vault/**/*-exports/
+/vault/**/exports/
 
 # Large scraped vendor dumps that trip secret scanners with example tokens
 **/unsloth/references/llms-full.md

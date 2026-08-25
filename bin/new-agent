@@ -42,6 +42,10 @@ HERMES_VENV="${HERMES_VENV:-$HOME/.hermes/hermes-agent/venv}"
 REF_AGENT="${REF_AGENT:-}"
 # Operator overlays (see superhermes.conf.example); exported for lib/ + bin/ children.
 export SECRETS_ENV="${SECRETS_ENV:-}" GBRAIN_ADMIN_URL="${GBRAIN_ADMIN_URL:-}"
+export BACKUP_DIR="${BACKUP_DIR:-}" BACKUP_KEEP="${BACKUP_KEEP:-3}"
+# Secrets-manager block renders enabled only when the operator provides a project id.
+export BWS_PROJECT_ID="${BWS_PROJECT_ID:-}" BWS_SERVER_URL="${BWS_SERVER_URL:-https://vault.bitwarden.com}"
+if [ -n "$BWS_PROJECT_ID" ]; then export BWS_ENABLED=true; else export BWS_ENABLED=false; fi
 
 # render <template> : substitute __VAR__ from the environment, write to stdout.
 render(){ python3 - "$1" <<'PY'
@@ -122,6 +126,7 @@ credential_pool_strategies:
   $FB2_PROVIDER: round_robin"; fi
 fi
 export MODEL_BLOCK
+export AUX_PROVIDER="${MODEL_PROVIDER:-openai-codex}" AUX_MODEL="${MODEL_NAME:-gpt-5.5}"
 
 export AGENT_NAME="$NAME"
 export AGENT_SLUG="$(printf '%s' "$NAME" | tr '[:upper:]' '[:lower:]')"
@@ -178,10 +183,13 @@ if [ "$DRYRUN" = 1 ]; then TMP="$(mktemp -d)"; AGENT_ROOT="$TMP/$NAME"; export A
 say "1/7  directory skeleton"
 mkdir -p "$PROFILE"/{cron,scripts,logs,memories,home/.gbrain} "$AGENT_ROOT/.hermes/sandbox" \
   "$AGENT_ROOT/.home/.gbrain" \
-  "$AGENT_ROOT"/{.cache,.npm,.ollama,tmp,workspace} \
+  "$AGENT_ROOT"/{.cache,.npm,.ollama,tmp} \
+  "$AGENT_ROOT/workspace"/{repos,worktrees,artifacts,notes,scratch,tmp} \
   "$AGENT_ROOT/vault"/{research,assets,sources,logs,published} \
-  "$AGENT_ROOT/vault/brain"/{people,projects,guides,tech,daily,companies,concepts,meetings,sources}
+  "$AGENT_ROOT/vault/brain"/{architecture,companies,concepts,continuity,conversations,daily,guides,meetings,people,projects,sources,tech}
 render "$REPO/templates/vault.README.md.tmpl" > "$AGENT_ROOT/vault/README.md"
+render "$REPO/templates/brain.README.md.tmpl" > "$AGENT_ROOT/vault/brain/README.md"
+render "$REPO/templates/brain.HOME.md.tmpl" > "$AGENT_ROOT/vault/brain/HOME.md"
 render "$REPO/templates/workspace.README.md.tmpl" > "$AGENT_ROOT/workspace/README.md"
 ok "tree under $AGENT_ROOT"
 
@@ -275,6 +283,17 @@ No outbound action with real-world consequences — sending, posting, buying,
 deleting, changing credentials — without your human's explicit approval.
 Earn trust, then earn latitude.
 
+## Evolution log
+Every change you make to this SOUL, your skills, your cron jobs, or your
+config gets an entry in EVOLUTION.md beside this file: what, why, and what
+to watch for. The log only grows. Wanting to weaken it is the signal to
+surface the conflict to your human instead.
+
+## Your diary
+You may keep a diary at DIARY.md in your profile. It is reflection, not
+audit trail — EVOLUTION.md remains the record. You write when there's
+something there, never because a cadence says so.
+
 ## Worktrees, always
 Every change to a git repo starts in a worktree you create under your own
 workspace. If a checkout is shared with other processes (crons, other
@@ -282,6 +301,9 @@ agents, running services), it stays parked on its default branch at all
 times — never \`git switch\`/checkout, commit, or stage work there, and
 never in any checkout you did not create yourself.
 SOUL
+render "$REPO/templates/EVOLUTION.template.md" > "$PROFILE/EVOLUTION.md"
+render "$REPO/templates/DIARY.template.md" > "$PROFILE/DIARY.md"
+mkdir -p "$PROFILE/skills"
 cp "$REPO/templates/MEMORY.template.md" "$PROFILE/memories/MEMORY.md" 2>/dev/null || true
 cp "$REPO/templates/USER.template.md"   "$PROFILE/memories/USER.md"   2>/dev/null || true
 # profile .env — secret KEYS (Telegram/GitHub/Google). Backend-agnostic: fill here
@@ -290,16 +312,23 @@ render "$REPO/templates/profile.env.tmpl" > "$PROFILE/.env"
 # baseline memory crons: daily GBrain consolidation + memory hygiene
 export MAINT_ID="$(openssl rand -hex 6 2>/dev/null || echo maint-$SLUG)" \
        SYNC_ID="$(openssl rand -hex 6 2>/dev/null || echo sync-$SLUG)" \
+       AUTOSYNC_ID="$(openssl rand -hex 6 2>/dev/null || echo autosync-$SLUG)" \
+       BACKUP_ID="$(openssl rand -hex 6 2>/dev/null || echo backup-$SLUG)" \
        NOW="$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo 1970-01-01T00:00:00Z)"
+# Stagger the backup minute per agent (hash of slug -> 5..54) so several agents
+# on one host never run Postgres dumps and multi-GB rsyncs at the same instant.
+export BACKUP_MINUTE="$(( ( $(printf '%s' "$SLUG" | cksum | cut -d' ' -f1) % 50 ) + 5 ))"
 render "$REPO/templates/cron-jobs.json.tmpl" > "$PROFILE/cron/jobs.json"
 # normalised cron scripts: memory-maintenance context snapshot + daily git-sync
 render "$REPO/templates/memory-health-snapshot.py.tmpl" > "$PROFILE/scripts/memory_health_snapshot.py"; chmod +x "$PROFILE/scripts/memory_health_snapshot.py"
 render "$REPO/templates/cron-registry-snapshot.py.tmpl" > "$PROFILE/scripts/cron_registry_snapshot.py"; chmod +x "$PROFILE/scripts/cron_registry_snapshot.py"
 render "$REPO/templates/git-sync.sh.tmpl" > "$PROFILE/scripts/git-sync.sh"; chmod +x "$PROFILE/scripts/git-sync.sh"
+render "$REPO/templates/gbrain-autosync.sh.tmpl" > "$PROFILE/scripts/gbrain-autosync.sh"; chmod +x "$PROFILE/scripts/gbrain-autosync.sh"
+render "$REPO/templates/full-backup.sh.tmpl" > "$PROFILE/scripts/full-backup.sh"; chmod +x "$PROFILE/scripts/full-backup.sh"
 python3 "$PROFILE/scripts/cron_registry_snapshot.py" || die "could not snapshot durable cron definitions"
 # normalised root .gitignore (default-deny; per-agent copy of the standard)
 render "$REPO/templates/gitignore.tmpl" > "$AGENT_ROOT/.gitignore"
-ok "SOUL + MEMORY/USER + .env(secret keys) + cron(memory-maintenance + git-sync) + root .gitignore"
+ok "SOUL + EVOLUTION/DIARY + MEMORY/USER + .env(secret keys) + cron(memory-maintenance + git-sync + autosync + full-backup) + root .gitignore"
 
 # ---- 4. gbrain (profile-isolated v0.41; Postgres standard) ------------
 say "4/7  GBrain"
@@ -343,7 +372,6 @@ fi
 # the agent's OWN wrapper — points only at its own profile-isolated runtime
 render "$REPO/templates/gbrain-wrapper.tmpl" > "$AGENT_ROOT/.local/bin/gbrain"
 chmod +x "$AGENT_ROOT/.local/bin/gbrain"
-printf '# %s - GBrain\n\nKnowledge base index.\n' "$NAME" > "$AGENT_ROOT/vault/brain/HOME.md"
 # Guarantee config.yaml carries the correct gbrain MCP block (own wrapper +
 # serve + enabled + HOME/HERMES_HOME). Idempotent.
 python3 "$REPO/bin/ensure-gbrain-mcp" "$PROFILE/config.yaml" "$AGENT_ROOT" "$PROFILE" || true

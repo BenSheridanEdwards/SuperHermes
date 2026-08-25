@@ -79,9 +79,9 @@ if config_path.exists():
             continue
         if in_agent and re.match(r"^\s+max_turns:\s*\d+\s*$", line):
             current = int(line.split(":", 1)[1].strip())
-            if current > 24:
+            if current > 200:
                 indentation = line[: len(line) - len(line.lstrip())]
-                lines[line_number] = f"{indentation}max_turns: 24"
+                lines[line_number] = f"{indentation}max_turns: 200"
                 changed = True
             break
     if changed:

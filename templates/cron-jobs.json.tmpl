@@ -3,7 +3,7 @@
     {
       "id": "__MAINT_ID__",
       "name": "Daily memory maintenance",
-      "prompt": "You are __AGENT_NAME__ running bounded daily memory maintenance. The attached snapshot is read-only ground truth. Work only inside __AGENT_ROOT__/vault/brain and through your OWN wrapper at __AGENT_ROOT__/.local/bin/gbrain. Finish in at most 8 model calls.\n\nRETRIEVAL BUDGET. Use exactly one session_search discovery with limit=1 for recent durable decisions; never read or scroll a full session. Use at most two focused gbrain retrievals via your own wrapper or MCP. If the snapshot and bounded retrieval expose no new durable fact, stop after the checks and report green.\n\nCONSOLIDATE. Save only durable, high-confidence facts into an existing topical page under vault/brain, updating in place. Reject secrets, PII, transcripts, PR numbers, SHAs, one-off completions, and low-confidence inference. Never edit USER.md or MEMORY.md and never create dated dump pages. Read a target before changing it and make no write when its meaning is unchanged.\n\nHYGIENE. Check only the retrieved evidence for wrong identity, misspelled contact data, inferred birthdays or ages, brittle meeting times, obsolete architecture, and split-brain storage. Correct only facts directly disproved by current evidence; otherwise flag them.\n\nVERIFY. Run __AGENT_ROOT__/.local/bin/gbrain import __AGENT_ROOT__/vault/brain --no-embed, then embed --stale, stats, and one retrieval for any page changed. Require the CLI and MCP to resolve to the same profile-local store. Report green/amber/red with what changed, rejected, and verified. Stay silent unless Chief needs to act.",
+      "prompt": "You are __AGENT_NAME__ running bounded daily memory maintenance. The attached snapshot is read-only ground truth. Work only inside __AGENT_ROOT__/vault/brain and through your OWN wrapper at __AGENT_ROOT__/.local/bin/gbrain. Finish in at most 8 model calls.\n\nRETRIEVAL BUDGET. Use exactly one session_search discovery with limit=1 for recent durable decisions; never read or scroll a full session. Use at most two focused gbrain retrievals via your own wrapper or MCP. If the snapshot and bounded retrieval expose no new durable fact, stop after the checks and report green.\n\nCONSOLIDATE. Save only durable, high-confidence facts into an existing topical page under vault/brain, updating in place. Reject secrets, PII, transcripts, PR numbers, SHAs, one-off completions, and low-confidence inference. Never edit USER.md or MEMORY.md and never create dated dump pages. Read a target before changing it and make no write when its meaning is unchanged.\n\nHYGIENE. Check only the retrieved evidence for wrong identity, misspelled contact data, inferred birthdays or ages, brittle meeting times, obsolete architecture, and split-brain storage. Correct only facts directly disproved by current evidence; otherwise flag them.\n\nVERIFY. Run __AGENT_ROOT__/.local/bin/gbrain import __AGENT_ROOT__/vault/brain --no-embed, then embed --stale, stats, and one retrieval for any page changed. Require the CLI and MCP to resolve to the same profile-local store. Report green/amber/red with what changed, rejected, and verified. Stay silent unless your human needs to act.",
       "skill": "memory-architecture",
       "script": "memory_health_snapshot.py",
       "enabled_toolsets": ["file", "terminal", "session_search", "memory"],
@@ -18,6 +18,24 @@
       "script": "git-sync.sh",
       "no_agent": true,
       "schedule": { "kind": "cron", "expr": "0 0 * * *", "display": "00:00 daily" },
+      "enabled": true
+    },
+    {
+      "id": "__AUTOSYNC_ID__",
+      "name": "gBrain autosync (vault to index)",
+      "prompt": "Zero-token index sync: import __AGENT_NAME__'s vault/brain into its profile-local GBrain store and embed stale chunks, so memory written this morning is retrievable this afternoon instead of after the nightly maintenance run.",
+      "script": "gbrain-autosync.sh",
+      "no_agent": true,
+      "schedule": { "kind": "cron", "expr": "*/30 * * * *", "display": "every 30m" },
+      "enabled": true
+    },
+    {
+      "id": "__BACKUP_ID__",
+      "name": "Daily full restore backup",
+      "prompt": "Deterministic full restore archive for __AGENT_NAME__: consistent state.db snapshot, profile minus caches, vault, GBrain pg_dump, gateway plist, and a generated RESTORE.md — integrity-gated zip with rotation. The one backup that can bring the agent back; the schedule minute is staggered per agent so multiple agents on one host never dump at once.",
+      "script": "full-backup.sh",
+      "no_agent": true,
+      "schedule": { "kind": "cron", "expr": "__BACKUP_MINUTE__ 3 * * *", "display": "daily ~03:00 (staggered)" },
       "enabled": true
     }
   ],
