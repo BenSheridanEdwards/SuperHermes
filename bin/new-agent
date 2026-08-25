@@ -40,6 +40,8 @@ else say "no superhermes.conf — using example defaults (copy superhermes.conf.
 SKILLS_DIR="${SKILLS_DIR:-}"; GBRAIN_BIN="${GBRAIN_BIN:-}"
 HERMES_VENV="${HERMES_VENV:-$HOME/.hermes/hermes-agent/venv}"
 REF_AGENT="${REF_AGENT:-}"
+# Operator overlays (see superhermes.conf.example); exported for lib/ + bin/ children.
+export SECRETS_ENV="${SECRETS_ENV:-}" GBRAIN_ADMIN_URL="${GBRAIN_ADMIN_URL:-}"
 
 # render <template> : substitute __VAR__ from the environment, write to stdout.
 render(){ python3 - "$1" <<'PY'
@@ -75,8 +77,8 @@ ask CAMP "Camp / workspace suffix (e.g. personal)" "personal"
 # Primary model + up to two fallbacks (+ optional round-robin key rotation),
 # asked on EVERY path. Defaults show in [brackets] (never hidden) — and when
 # cloning a reference agent they default to THAT agent's model, so accepting
-# them clones it verbatim and changing one overrides it. Fleet defaults like
-# MiMo are layered on top by the fleet, NOT here — SuperHermes is model-agnostic.
+# them clones it verbatim and changing one overrides it. House defaults are
+# layered on top by your deployment, NOT here — SuperHermes is model-agnostic.
 DEF_MP="openai-codex"; DEF_MM="gpt-5.5"; DEF_F1P=""; DEF_F1M=""; DEF_F2P=""; DEF_F2M=""; DEF_RR="N"
 if [ -n "$REF_AGENT" ] && [ -d "$AGENTS_ROOT/$REF_AGENT" ]; then
   _rs="$(printf '%s' "$REF_AGENT" | tr '[:upper:]' '[:lower:]')"
@@ -206,7 +208,7 @@ else
 fi
 # Install the operator's chosen model over whatever the template/clone produced:
 # replaces the model / providers / fallback_providers / credential_pool_strategies
-# blocks, preserving every other key. SuperHermes-owned helper (no Fleet dep).
+# blocks, preserving every other key. SuperHermes-owned helper (no external dep).
 printf '%s\n' "$MODEL_BLOCK" | python3 "$REPO/bin/set-model-block" write "$PROFILE/config.yaml" || die "could not set model block"
 ok "model → ${MODEL_PROVIDER:-openai-codex}/${MODEL_NAME:-gpt-5.5}"
 python3 "$REPO/bin/set-busy-input-mode" "$PROFILE/config.yaml" steer \
@@ -295,17 +297,17 @@ render "$REPO/templates/memory-health-snapshot.py.tmpl" > "$PROFILE/scripts/memo
 render "$REPO/templates/cron-registry-snapshot.py.tmpl" > "$PROFILE/scripts/cron_registry_snapshot.py"; chmod +x "$PROFILE/scripts/cron_registry_snapshot.py"
 render "$REPO/templates/git-sync.sh.tmpl" > "$PROFILE/scripts/git-sync.sh"; chmod +x "$PROFILE/scripts/git-sync.sh"
 python3 "$PROFILE/scripts/cron_registry_snapshot.py" || die "could not snapshot durable cron definitions"
-# normalised root .gitignore (default-deny; per-agent copy of the fleet standard)
+# normalised root .gitignore (default-deny; per-agent copy of the standard)
 render "$REPO/templates/gitignore.tmpl" > "$AGENT_ROOT/.gitignore"
 ok "SOUL + MEMORY/USER + .env(secret keys) + cron(memory-maintenance + git-sync) + root .gitignore"
 
-# ---- 4. gbrain (profile-isolated v0.41; Postgres fleet standard) ------------
+# ---- 4. gbrain (profile-isolated v0.41; Postgres standard) ------------
 say "4/7  GBrain"
 mkdir -p "$PROFILE/home/.gbrain" "$AGENT_ROOT/.local/bin" "$AGENT_ROOT/vault/brain"
-# Fleet standard: Postgres at birth (never PGLite). Embed on Ollama :11434/v1.
+# Standard: Postgres at birth (never PGLite). Embed on Ollama :11434/v1.
 # Dry-run writes config only; live scaffold also CREATE ROLE/DATABASE.
-# Client trees live under .../Clients/<client>/<Name>. Match Fleet identity
-# gbrain_<client>_<slug> so pointers and runtime contract never disagree.
+# Client trees live under .../Clients/<client>/<Name>. Match the
+# gbrain_<client>_<slug> identity so pointers and runtime contract never disagree.
 # (bash 3.2 + set -u: never expand an empty array.)
 GBRAIN_CLIENT_ID=""
 case "$AGENT_ROOT" in
@@ -356,7 +358,7 @@ cat > "$LA/ai.hermes.gateway-$SLUG.plist" <<PLIST
   <key>Label</key><string>ai.hermes.gateway-$SLUG</string>
   <key>ProgramArguments</key><array>
     <string>/usr/bin/sandbox-exec</string><string>-f</string><string>$AGENT_ROOT/.hermes/sandbox/$SLUG.sb</string>
-    <string>/Users/agents/.fleet/bin/hermes-gateway-launch</string>
+    <string>${GATEWAY_LAUNCHER:-$HOME/.local/bin/hermes-gateway-launch}</string>
     <string>$SLUG</string><string>$PROFILE</string>
   </array>
   <key>WorkingDirectory</key><string>$AGENT_ROOT/workspace</string>

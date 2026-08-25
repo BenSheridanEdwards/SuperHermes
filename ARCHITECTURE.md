@@ -13,7 +13,7 @@ files. Shared things live in one shared place; private things live in the agent'
 own home. Nothing in between.
 
 **Why.** A "shared" GBrain wrapper that exec'd into one agent's private Bun cache
-made the whole fleet depend on that one agent — wipe its cache and others broke.
+made every agent depend on that one agent — wipe its cache and others broke.
 Independence means a failure in one agent can't cascade.
 
 ### 2. The sandbox is the sole write boundary — "town-square," allow-all-then-deny
@@ -71,7 +71,7 @@ every turn. Distinct jobs, distinct stores.
 ### 7. Config is generated/synced from one source — never hand-edited per agent
 **Decision.** Per-agent config derives from templates and matrices, not manual edits.
 
-**Why.** Hand-edited fleets drift. A single audit found three different config
+**Why.** Hand-edited agents drift apart. A single audit found three different config
 schema versions, split GBrain stores, and a missing memory-wiring file — all
 silent. One source + a render/sync step makes drift structurally hard.
 
@@ -99,7 +99,7 @@ hardcoded.
 
 **Why.** The framework is meant to be shared/open-source — so it can't assume any
 one secrets backend. Declaring the keys and leaving the source pluggable keeps it
-usable by a solo operator with a plain `.env` *and* by a fleet centralising on
+usable by a solo operator with a plain `.env` *and* by a deployment centralising on
 BitWarden, with no fork. Secrets are recoverable; a leaked secret in public git
 history is not.
 
@@ -116,13 +116,13 @@ verified in its own way.
 ### 11. Each agent is its own git repo at its root; `.gitignore` normalised, not centralised
 **Decision.** Every agent is a standalone git repo rooted at `AGENTS_ROOT/<Name>/`.
 Each carries its **own** copy of a **default-deny** `.gitignore` that follows one
-fleet standard — normalised (same rules everywhere) but not centralised (no shared
+shared standard — normalised (same rules everywhere) but not centralised (no shared
 or symlinked file). The ignore allow-lists only the durable identity (config, soul,
 memory, crons, scripts, sandbox, README); everything else is denied by default.
 
 **Why.** *Per-agent repo* keeps the independence principle (decision 1) true at the
 version-control layer — each agent's history is its own, pushable on its own, with
-no fleet-monorepo coupling. *Default-deny* is the only model that's safe by
+no monorepo coupling. *Default-deny* is the only model that's safe by
 construction: an allow-list-on-top-of-deny can't leak a brand-new kind of secret,
 whereas a deny-list silently tracks anything you forgot to exclude. An early audit
 found one agent tracking 760+ files (including a retired memory plugin) next to

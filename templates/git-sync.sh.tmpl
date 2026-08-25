@@ -19,8 +19,8 @@
 #   • Never bare `git push` first — non-interactive hosts often hang on the
 #     credential helper (scar 2026-08-06). Push only via env token + HTTPS header.
 #
-# Camp-specific secret plumbing (Bitwarden, fleet env files, hard-coded host
-# paths) does NOT belong here. Downstream camps (e.g. Fleet) overlay their own
+# Camp-specific secret plumbing (Bitwarden, operator env files, hard-coded host
+# paths) does NOT belong here. Downstream deployments overlay their own
 # git-sync after scaffold when they need vault-backed tokens.
 #
 # OUTPUT CONTRACT (runs as a no_agent cron job → stdout is delivered verbatim to

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Read or replace the model section of a Hermes config.yaml — SuperHermes-owned,
-no Fleet dependency, no PyYAML (system python3 may lack it). Line-based so every
+no external dependency, no PyYAML (system python3 may lack it). Line-based so every
 other key, comment, and bit of formatting is preserved.
 
 The "model section" = the top-level blocks `model`, `providers`,
