@@ -16,24 +16,55 @@
 #   verify-fleet --quiet         # only WARN/FAIL lines + summary
 #
 # AGENTS_ROOT resolves from: --root → $AGENTS_ROOT → superhermes.conf(.example).
+#
+# Store checks are engine-aware (per-agent gbrain config.json decides): a
+# postgres engine asserts database_url reachability + fleet-wide db isolation;
+# a pglite engine asserts the store lives inside the agent's own profile.
+# RUNTIME_CONTRACT_STATE (env or superhermes.conf) optionally points at the
+# fleet reconciler's state JSON; when set, each agent must be enrolled and
+# healthy there. Unset (lone agent, no reconciler) skips those checks.
 # ============================================================================
-import argparse, json, os, re, subprocess, sys, plistlib
+import argparse, json, os, re, socket, subprocess, sys, plistlib
+from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlparse
 
 # gbrain binary version per agent, collected during the per-agent pass and
 # asserted for consistency in the cross-fleet section.
 GBRAIN_VERSIONS = {}
+# gbrain store identity (host, port, dbname) per agent — asserted distinct in
+# the cross-fleet section (per-agent isolation on a shared postgres server).
+STORE_IDS = {}
 
 C = {"P": "\033[32m", "W": "\033[33m", "F": "\033[31m", "H": "\033[36m", "D": "\033[2m", "x": "\033[0m"}
 if not sys.stdout.isatty():
     C = {k: "" for k in C}
 
-TRACKED_WARN_THRESHOLD = 60  # identity repos are tiny; more than this smells like bloat
+# Brain-open canon (Chief, 2026-08-06): identity repos deliberately track the
+# ENTIRE vault plus skills/plugins, so they are no longer tiny. The runaway
+# threshold below is a canary for accidental tree adds, not a size policy.
+TRACKED_WARN_THRESHOLD = 5000
+# Filename patterns that are credential PAYLOADS (not files merely named after
+# tokens — docs about tokens are first-class under Brain-open; the content scan
+# below is what guards actual values).
 SECRET_FILE_RE = re.compile(r"(^|/)\.env($|\.)|auth\.json|google_token|\.git-credentials|"
-                            r".*token.*|.*credential.*|.*secret.*|\.pem$|\.key$|\.p12$", re.I)
-BINARY_TRACKED_RE = re.compile(r"\.(pglite|sqlite|sqlite3|db|gguf|safetensors|bin|"
-                               r"png|jpe?g|gif|webp|mp4|mov|ogg|mp3|wav|pdf|zip)$", re.I)
-TRACKED_TREE_DENY_RE = re.compile(r"^(vault/|workspace/|\.hermes/honcho/|\.home/|\.cache/|\.npm/)")
+                            r"id_rsa|id_ed25519|\.pem$|\.key$|\.p12$|\.pfx$|\.kdbx$", re.I)
+# Machine-state stores never belong in git history; ordinary media assets in
+# the vault/skills are allowed under Brain-open.
+BINARY_TRACKED_RE = re.compile(r"\.(pglite|sqlite|sqlite3|db|gguf|safetensors|pt|pth|onnx)$", re.I)
+TRACKED_TREE_DENY_RE = re.compile(r"^(workspace/|\.hermes/honcho/|\.home/|\.cache/|\.npm/)")
+# High-confidence LIVE credential shapes (not name matches — actual values).
+# Deliberately conservative: formats that are never legitimate doc examples.
+# Generic `sk-…` is excluded — docs use `sk-xxx…` placeholders constantly.
+SECRET_CONTENT_PATTERNS = {
+    "telegram-bot-token": re.compile(r"\b\d{8,10}:AA[A-Za-z0-9_-]{33}\b"),
+    "bws-machine-token": re.compile(r"\b0\.[a-f0-9]{8}-[a-f0-9-]{27}\.[A-Za-z0-9]{20,}\b"),
+    "github-pat": re.compile(r"\b(?:ghp_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{22,})\b"),
+    "anthropic-key": re.compile(r"\bsk-ant-[A-Za-z0-9-]{20,}\b"),
+    "slack-token": re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}\b"),
+    "private-key-block": re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
+}
+SECRET_SCAN_MAX_BYTES = 2 * 1024 * 1024
 
 
 class Report:
@@ -57,18 +88,47 @@ class Report:
         print(f"  {col}{sym}{C['x']} {msg}{d}")
 
 
+def conf_value(repo, key):
+    """Read one KEY=value from superhermes.conf (operator overrides) falling
+    back to superhermes.conf.example. $VARS and ~ are expanded."""
+    for name in ("superhermes.conf", "superhermes.conf.example"):
+        p = repo / name
+        if p.exists():
+            m = re.search(rf'^\s*{key}\s*=\s*["\']?([^"\'\n#]+)', p.read_text(), re.M)
+            if m:
+                v = m.group(1).strip()
+                if v:
+                    return os.path.expanduser(os.path.expandvars(v))
+    return None
+
+
 def resolve_root(args, repo):
     if args.root:
         return Path(args.root)
     if os.environ.get("AGENTS_ROOT"):
         return Path(os.environ["AGENTS_ROOT"])
-    for name in ("superhermes.conf", "superhermes.conf.example"):
-        p = repo / name
-        if p.exists():
-            m = re.search(r'^\s*AGENTS_ROOT\s*=\s*["\']?([^"\'\n#]+)', p.read_text(), re.M)
-            if m:
-                return Path(m.group(1).strip())
+    v = conf_value(repo, "AGENTS_ROOT")
+    if v:
+        return Path(v)
     sys.exit("verify-fleet: cannot resolve AGENTS_ROOT (use --root, $AGENTS_ROOT, or superhermes.conf)")
+
+
+def load_contract_state(repo):
+    """Optional runtime-contract enrollment state: a JSON file written by the
+    fleet's runtime reconciler mapping agent ids → {incident, healthy_at}.
+    Configured via $RUNTIME_CONTRACT_STATE or superhermes.conf; a lone agent
+    (no reconciler) leaves it unset and the enrollment checks are skipped."""
+    path = os.environ.get("RUNTIME_CONTRACT_STATE") or conf_value(repo, "RUNTIME_CONTRACT_STATE")
+    if not path:
+        return None, None
+    p = Path(path)
+    if not p.exists():
+        return None, f"configured but missing: {p}"
+    try:
+        agents = json.loads(p.read_text()).get("agents", {})
+        return (agents if isinstance(agents, dict) else {}), None
+    except Exception as e:
+        return None, f"unreadable: {e}"
 
 
 def discover_agents(root):
@@ -114,7 +174,7 @@ def _gbrain_serve_running(root):
         return False
 
 
-def check_agent(name, slug, root, rpt, config_versions):
+def check_agent(name, slug, root, rpt, config_versions, contract_agents):
     print(f"\n{C['H']}━━ {name} ({slug}) ━━{C['x']}")
     profile = root / ".hermes" / "profiles" / slug
 
@@ -129,14 +189,37 @@ def check_agent(name, slug, root, rpt, config_versions):
     else:
         rpt.line("P", name, "own GBrain wrapper present")
     cfg = profile / "home" / ".gbrain" / "config.json"
+    engine = None
     if cfg.exists():
         try:
             gc = json.loads(cfg.read_text())
-            db = gc.get("database_path", "")
-            if "Shared/" in db or "/.gbrain/" not in db:
-                rpt.line("F", name, "GBrain store path", f"not profile-isolated: {db}")
+            engine = gc.get("engine") or "pglite"
+            if engine == "postgres":
+                # store contract: an explicit per-agent database_url whose
+                # server answers. Isolation (distinct db per agent) is asserted
+                # fleet-wide once all agents are collected.
+                db_url = gc.get("database_url") or gc.get("databaseUrl") or ""
+                u = urlparse(db_url) if db_url else None
+                if not db_url or not u.hostname:
+                    rpt.line("F", name, "GBrain postgres database_url",
+                             f"missing or unparsable: {db_url!r}")
+                else:
+                    host, port = u.hostname, u.port or 5432
+                    STORE_IDS[name] = (host, port, (u.path or "").lstrip("/"))
+                    try:
+                        with socket.create_connection((host, port), timeout=3):
+                            rpt.line("P", name, f"GBrain postgres reachable ({host}:{port})")
+                    except OSError as e:
+                        rpt.line("F", name, "GBrain postgres reachable",
+                                 f"{host}:{port} — {e}")
             else:
-                rpt.line("P", name, "GBrain store profile-isolated")
+                # pglite (lone-agent default): store must live inside the
+                # agent's own profile, never a shared path.
+                db = gc.get("database_path", "")
+                if "Shared/" in db or "/.gbrain/" not in db:
+                    rpt.line("F", name, "GBrain store path", f"not profile-isolated: {db}")
+                else:
+                    rpt.line("P", name, "GBrain store profile-isolated")
             # embedding endpoint must be the OpenAI-compatible /v1 base (fleet canon)
             eb = (gc.get("embedding_base_url", "") or "").rstrip("/")
             rpt.line("P" if eb.endswith("/v1") else "F", name,
@@ -147,20 +230,21 @@ def check_agent(name, slug, root, rpt, config_versions):
     else:
         rpt.line("W", name, "GBrain config.json", "not found")
 
-    # 2b. the definitive regression test: the brain actually OPENS and reads.
-    # A corrupted WAL (unclean shutdown) makes PGLite's WASM abort on open — the
-    # exact failure that took down DiVinci/Iris/Neo on 2026-06-04. Note: gbrain's
-    # CLI leaves a postmaster.pid behind after any access, so the pid file ALONE
-    # is not a corruption signal — only a pid file + a failed open is. We skip the
-    # open when a live serve holds the single-writer pglite (would false-fail).
+    # 2b. the definitive regression test: the brain actually OPENS and reads,
+    # via the agent's OWN wrapper — for postgres this is the real per-agent
+    # store-reachability proof (auth + database exist, not just a TCP port).
+    # pglite background: a corrupted WAL (unclean shutdown) makes PGLite's WASM
+    # abort on open — the exact failure that took down DiVinci/Iris/Neo on
+    # 2026-06-04. gbrain's CLI leaves a postmaster.pid behind after any access,
+    # so the pid file ALONE is not a corruption signal — only pid + failed open
+    # is. We skip the open when a live serve holds the single-writer pglite.
     pglite = profile / "home" / ".gbrain" / "brain.pglite"
     pidf = pglite / "postmaster.pid"
-    serve_alive = _gbrain_serve_running(root)
     if not (wrap.exists() and os.access(wrap, os.X_OK)):
         pass  # wrapper failure already reported above
-    elif pidf.exists() and serve_alive:
+    elif engine != "postgres" and pidf.exists() and _gbrain_serve_running(root):
         rpt.line("P", name, "GBrain brain held open by live serve")
-    elif pglite.exists():
+    elif engine == "postgres" or pglite.exists():
         try:
             out = subprocess.run([str(wrap), "list", "-n", "1"],
                                  text=True, capture_output=True, timeout=25)
@@ -185,23 +269,28 @@ def check_agent(name, slug, root, rpt, config_versions):
         except Exception:
             GBRAIN_VERSIONS[name] = "ERR"
 
-    # 3. no stale shared-wrapper references in scripts
+    # 3. scripts must invoke the agent's OWN gbrain CLI, never one from outside
+    # its root (a retired shared shim hardcoded another agent's binary — silent
+    # version/runtime drift). Matches only the bare `.../bin/gbrain` CLI; sibling
+    # tools like gbrain-autosync / gbrain-capture-audit are fine.
     scripts = profile / "scripts"
+    foreign_cli_re = re.compile(r"(\S*/bin/gbrain)(?![\w.-])")
     bad_shared = []
     if scripts.is_dir():
         for f in scripts.rglob("*"):
             if f.is_file():
                 try:
-                    if "Shared/bin/gbrain" in f.read_text(errors="ignore"):
-                        bad_shared.append(f.name)
+                    for ref in foreign_cli_re.findall(f.read_text(errors="ignore")):
+                        if not ref.startswith(str(root)):
+                            bad_shared.append(f"{f.name} → {ref}")
                 except Exception:
                     pass
-    rpt.line("F" if bad_shared else "P", name, "no shared-wrapper (Shared/bin/gbrain) refs in scripts",
-             ", ".join(bad_shared))
+    rpt.line("F" if bad_shared else "P", name, "no foreign gbrain-CLI refs in scripts (own wrapper only)",
+             "; ".join(dict.fromkeys(bad_shared)))
 
     # 4 & 5. cron referential integrity + no retired-system refs
     jobs_path = profile / "cron" / "jobs.json"
-    missing_scripts, localmem_jobs = [], []
+    missing_scripts, localmem_jobs, honcho_jobs = [], [], []
     if jobs_path.exists():
         try:
             jobs = json.loads(jobs_path.read_text()).get("jobs", [])
@@ -222,10 +311,17 @@ def check_agent(name, slug, root, rpt, config_versions):
                     missing_scripts.append(f"{j.get('name','?')} → profile scripts/{m}")
             if j.get("enabled") and re.search(r"localmem_(profile|forget)", prompt):
                 localmem_jobs.append(j.get("name", "?"))
+            # Honcho was decommissioned; prompts steering agents at it waste
+            # turns against a dead service. Advisory (WARN) — prose mentions
+            # are drift, not breakage.
+            if j.get("enabled") and re.search(r"honcho", prompt, re.I):
+                honcho_jobs.append(j.get("name", "?"))
         rpt.line("F" if missing_scripts else "P", name, "cron scripts all exist",
                  "; ".join(dict.fromkeys(missing_scripts)))
         rpt.line("F" if localmem_jobs else "P", name, "no retired-LocalMem refs in active crons",
                  ", ".join(localmem_jobs))
+        rpt.line("W" if honcho_jobs else "P", name, "no retired-Honcho refs in active crons",
+                 ", ".join(dict.fromkeys(honcho_jobs)))
         # baseline coverage (advisory): a memory-maintenance job + a git-sync job
         blob = " ".join((j.get("name", "") + " " + (j.get("script") or "") + " " + (j.get("skill") or "")).lower()
                         for j in jobs if j.get("enabled"))
@@ -247,27 +343,66 @@ def check_agent(name, slug, root, rpt, config_versions):
             rpt.line("F", name, "normalised .gitignore", "missing or non-standard")
         tracked = [t for t in git(root, "ls-files").splitlines() if t]
         leaks = [t for t in tracked
-                 if t != ".hermes/profiles/%s/honcho.json" % slug
-                 and (SECRET_FILE_RE.search(t) or BINARY_TRACKED_RE.search(t) or TRACKED_TREE_DENY_RE.search(t))]
+                 if SECRET_FILE_RE.search(t) or BINARY_TRACKED_RE.search(t) or TRACKED_TREE_DENY_RE.search(t)]
         rpt.line("F" if leaks else "P", name, "no secrets/binaries/excluded-trees tracked",
                  f"{len(leaks)} offending: " + ", ".join(leaks[:5]) if leaks else "")
         if len(tracked) > TRACKED_WARN_THRESHOLD:
             rpt.line("W", name, "tracked-file count sane", f"{len(tracked)} files (>{TRACKED_WARN_THRESHOLD})")
         else:
             rpt.line("P", name, f"tracked-file count sane ({len(tracked)})")
+        # 6b. content scan: no LIVE credential values in any tracked file.
+        # Filename rules can't catch a token pasted into config.yaml — this can.
+        # Reports file + pattern name only, never the value.
+        live_secrets = []
+        for t in tracked:
+            fp = root / t
+            try:
+                if not fp.is_file() or fp.stat().st_size > SECRET_SCAN_MAX_BYTES:
+                    continue
+                text = fp.read_text(errors="ignore")
+            except Exception:
+                continue
+            for pname, rx in SECRET_CONTENT_PATTERNS.items():
+                if rx.search(text):
+                    live_secrets.append(f"{t} [{pname}]")
+        rpt.line("F" if live_secrets else "P", name, "no live credential values in tracked files",
+                 "; ".join(live_secrets[:5]) + ("…" if len(live_secrets) > 5 else ""))
     else:
         rpt.line("F", name, "root git repo (.git)", "MISSING")
 
-    # 7. honcho.json present + parses
+    # 7. no retired-Honcho artifacts: Honcho was decommissioned (2026-07-15);
+    # a lingering honcho.json is dead config that misleads tooling.
     hj = profile / "honcho.json"
-    if hj.exists():
-        try:
-            json.loads(hj.read_text())
-            rpt.line("P", name, "honcho.json present + valid")
-        except Exception as e:
-            rpt.line("F", name, "honcho.json parse", str(e))
-    else:
-        rpt.line("F", name, "honcho.json", "MISSING")
+    rpt.line("W" if hj.exists() else "P", name,
+             "no retired honcho.json (Honcho decommissioned)",
+             "still present — remove" if hj.exists() else "")
+
+    # 7b. runtime-contract enrollment (only when a reconciler is configured —
+    # see RUNTIME_CONTRACT_STATE in superhermes.conf; lone agents skip this).
+    if contract_agents is not None:
+        entry = contract_agents.get(slug)
+        if entry is None:
+            entry = next((v for k, v in contract_agents.items()
+                          if k == slug or k.endswith(f":{slug}")), None)
+        if not isinstance(entry, dict):
+            rpt.line("F", name, "runtime-contract enrollment", "no state entry for this agent")
+        elif entry.get("incident"):
+            rpt.line("F", name, "runtime-contract healthy", f"open incident: {_short(json.dumps(entry['incident']))}")
+        else:
+            age_h = None
+            try:
+                ts = datetime.fromisoformat(str(entry.get("healthy_at")))
+                if ts.tzinfo is None:
+                    ts = ts.replace(tzinfo=timezone.utc)
+                age_h = (datetime.now(timezone.utc) - ts).total_seconds() / 3600
+            except Exception:
+                pass
+            if age_h is None:
+                rpt.line("W", name, "runtime-contract healthy", f"unparsable healthy_at: {entry.get('healthy_at')!r}")
+            elif age_h > 24:
+                rpt.line("W", name, "runtime-contract healthy", f"last healthy {age_h:.0f}h ago — reconciler stale?")
+            else:
+                rpt.line("P", name, "runtime-contract enrolled + healthy")
 
     # 8. config version (collect for cross-fleet consistency check)
     conf = profile / "config.yaml"
@@ -310,14 +445,32 @@ def main():
         if not agents:
             sys.exit(f"verify-fleet: agent '{args.agent}' not found under {root}")
 
+    contract_agents, contract_err = load_contract_state(repo)
+
     print(f"{C['H']}SuperHermes fleet check{C['x']}  root={root}  agents={len(agents)}")
     rpt = Report()
     config_versions = {}
     for name, slug, droot in agents:
-        check_agent(name, slug, droot, rpt, config_versions)
+        check_agent(name, slug, droot, rpt, config_versions, contract_agents)
 
     # cross-fleet: config version consistency
     print(f"\n{C['H']}━━ fleet-wide ━━{C['x']}")
+    if contract_err:
+        rpt.line("F", "*", "runtime-contract state file", contract_err)
+    elif contract_agents is None:
+        print(f"  {C['D']}runtime-contract: not configured (RUNTIME_CONTRACT_STATE) — enrollment checks skipped{C['x']}")
+
+    # cross-fleet: postgres store isolation — no two agents may share a database
+    dup = {}
+    for a, sid in STORE_IDS.items():
+        dup.setdefault(sid, []).append(a)
+    shared = {sid: names for sid, names in dup.items() if len(names) > 1}
+    if STORE_IDS:
+        if shared:
+            detail = "; ".join(f"{h}:{p}/{db} ← {', '.join(names)}" for (h, p, db), names in shared.items())
+            rpt.line("F", "*", "gbrain store database distinct per agent", detail)
+        else:
+            rpt.line("P", "*", f"gbrain store database distinct per agent ({len(STORE_IDS)} postgres)")
     vers = set(config_versions.values())
     if len(vers) <= 1:
         rpt.line("P", "*", f"config versions consistent ({', '.join(vers) or 'n/a'})")

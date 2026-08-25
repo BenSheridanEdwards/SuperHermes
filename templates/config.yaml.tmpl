@@ -40,7 +40,7 @@ code_execution:
   mode: project
 
 # Credentials are pulled automatically from Bitwarden Secrets Manager at startup
-# (the shared agentfleet-reader token lives in /Users/agents/Agents/.fleet.env,
+# (the shared agentfleet-reader token lives in /Users/agents/.fleet/config/.fleet.env,
 # loaded by hermes-gateway-launch). This block makes a NEW agent auto-pull the
 # whole vault on day one — without it the agent starts with no creds. The fleet
 # `credentials` health probe flags any agent missing this.

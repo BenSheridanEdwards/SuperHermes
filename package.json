@@ -1,0 +1,48 @@
+{
+  "name": "superhermes",
+  "version": "0.1.0",
+  "description": "Fleet-agnostic agent scaffolder and blueprint: one command births a self-contained Hermes agent (gateway, GBrain memory, sandbox, launchd, cron) on macOS.",
+  "license": "MIT",
+  "author": "Ben Sheridan Edwards",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/BenSheridanEdwards/SuperHermes.git"
+  },
+  "homepage": "https://github.com/BenSheridanEdwards/SuperHermes#readme",
+  "bugs": {
+    "url": "https://github.com/BenSheridanEdwards/SuperHermes/issues"
+  },
+  "keywords": [
+    "agents",
+    "scaffolder",
+    "hermes",
+    "gbrain",
+    "launchd",
+    "macos"
+  ],
+  "os": [
+    "darwin"
+  ],
+  "bin": {
+    "superhermes-new-agent": "bin/new-agent",
+    "superhermes-verify-fleet": "bin/verify-fleet",
+    "superhermes-ensure-gbrain-mcp": "bin/ensure-gbrain-mcp",
+    "superhermes-ensure-gbrain-postgres": "bin/ensure-gbrain-postgres",
+    "superhermes-set-busy-input-mode": "bin/set-busy-input-mode",
+    "superhermes-set-model-block": "bin/set-model-block",
+    "superhermes-migrate-cron-registry-git": "bin/migrate-cron-registry-git"
+  },
+  "files": [
+    "bin/",
+    "lib/",
+    "templates/",
+    "skills/",
+    "docs/building-agents.md",
+    "docs/operations.md",
+    "superhermes.conf.example",
+    "ARCHITECTURE.md"
+  ],
+  "scripts": {
+    "test": "bash tests/run-tests.sh"
+  }
+}
