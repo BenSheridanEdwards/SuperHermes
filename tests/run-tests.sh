@@ -111,7 +111,7 @@ assert_has "$out" "memory-maintenance"        "renders memory-maintenance cron"
 assert_has "$out" "DRY-RUN complete"         "completes cleanly"
 td="$(printf '%s' "$out" | python3 -c "import sys,re;t=re.sub(r'\x1b\[[0-9;]*m','',sys.stdin.read());m=re.search(r'dry-run . (\S+)',t);print(m.group(1) if m else '')")"
 pl="$(cat "$td/LaunchAgents/ai.hermes.gateway-testunit.plist" 2>/dev/null)"
-assert_has "$pl" ".fleet/bin/hermes-gateway-launch" "gateway plist uses the fleet launcher"
+assert_has "$pl" "hermes-gateway-launch" "gateway plist launches via the operator's gateway launcher"
 assert_hasnt "$pl" "hermes_cli.main"                "gateway plist does not bypass shared launcher"
 assert_has "$pl" "<string>testunit</string>"        "gateway plist passes slug to launcher"
 configured_soft_file_limit="$(python3 - "$td/LaunchAgents/ai.hermes.gateway-testunit.plist" <<'PY'

@@ -356,7 +356,7 @@ cat > "$LA/ai.hermes.gateway-$SLUG.plist" <<PLIST
   <key>Label</key><string>ai.hermes.gateway-$SLUG</string>
   <key>ProgramArguments</key><array>
     <string>/usr/bin/sandbox-exec</string><string>-f</string><string>$AGENT_ROOT/.hermes/sandbox/$SLUG.sb</string>
-    <string>/Users/agents/.fleet/bin/hermes-gateway-launch</string>
+    <string>${GATEWAY_LAUNCHER:-$HOME/.local/bin/hermes-gateway-launch}</string>
     <string>$SLUG</string><string>$PROFILE</string>
   </array>
   <key>WorkingDirectory</key><string>$AGENT_ROOT/workspace</string>

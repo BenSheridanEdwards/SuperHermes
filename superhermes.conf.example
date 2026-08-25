@@ -13,6 +13,12 @@ SKILLS_DIR="$AGENTS_ROOT/Shared/skills"
 # Python venv that runs the Hermes gateway.
 HERMES_VENV="$HOME/.hermes/hermes-agent/venv"
 
+# Gateway launcher the generated launchd plist executes. SuperHermes deliberately
+# does not ship one: how a gateway boots (env loading, secret injection, logging)
+# is operator plumbing, not blueprint. Point this at your launcher script; an
+# orchestration layer (e.g. a fleet runtime) sets it to its own.
+GATEWAY_LAUNCHER="$HOME/.local/bin/hermes-gateway-launch"
+
 # Optional: state JSON written by your fleet's runtime reconciler (the job that
 # proves gateway/store/backup health per agent), mapping agent ids →
 # {incident, healthy_at}. Agent ids may be bare slugs or namespaced "…:<slug>".

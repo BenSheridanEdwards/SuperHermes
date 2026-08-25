@@ -1,11 +1,11 @@
 # SuperHermes
 
-**Run a fleet of autonomous AI agents — each isolated, each with its own
-persistent memory — and spin up a new one with a single command.**
+**The blueprint for the best version of a
+[Hermes](https://github.com/NousResearch/hermes) agent: one command births a
+complete, self-contained agent with its own home, persistent memory, sandbox,
+and gateway.**
 
-SuperHermes is a framework and reference architecture for
-[Hermes](https://github.com/NousResearch/hermes) agents living side by side on one
-machine. Every agent gets its own home, its own persistent memory (GBrain), a
+Every agent gets its own home, its own persistent memory (GBrain), a
 hardened "town-square" sandbox, and a launchd-managed gateway — and
 `new-agent` builds one **correct from day one**, in a single command.
 
@@ -17,6 +17,19 @@ bin/new-agent --name Sky --camp personal
 > This README is the source of truth for *how* an ideal agent is built. The
 > durable **decisions** behind it — each with the failure it prevents — live in
 > **[ARCHITECTURE.md](ARCHITECTURE.md)**.
+
+## Not a fleet
+
+SuperHermes defines a single, ideal agent. It is deliberately
+orchestration-agnostic: nothing here knows about any fleet, and the litmus test
+for what belongs is "would a lone agent need it?"
+
+Orchestration layers sit **above** this blueprint and consume it as a package
+(npm: `superhermes`). They overlay their own plumbing after scaffold: gateway
+launchers (`GATEWAY_LAUNCHER` in `superhermes.conf`), secret distribution,
+health probes, shared skills libraries, roster membership. One example of such
+a layer is F.L.E.E.T., which depends on this package; SuperHermes does not
+depend on it, or on any fleet.
 
 ---
 
