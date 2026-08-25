@@ -33,7 +33,8 @@ export LA="$tmp/LaunchAgents"
 export DISK_FLOOR_GB=0
 mkdir -p "$PROFILE" "$AGENT_ROOT/.local/bin" "$LA" "$AGENT_ROOT/vault/brain"
 printf 'TELEGRAM_BOT_TOKEN=\n' > "$PROFILE/.env"; chmod 644 "$PROFILE/.env"
-printf 'BWS_ACCESS_TOKEN=test-token-xyz\n' > "$AGENTS_ROOT/.fleet.env"
+export SECRETS_ENV="$AGENTS_ROOT/secrets.env"
+printf 'BWS_ACCESS_TOKEN=test-token-xyz\n' > "$SECRETS_ENV"
 { printf '#!/bin/sh\n'; printf 'exit 0\n'; } > "$AGENT_ROOT/.local/bin/gbrain"; chmod +x "$AGENT_ROOT/.local/bin/gbrain"
 
 # ---- run with mocks on PATH ----
@@ -47,7 +48,7 @@ grep -q "launchctl setenv BWS_ACCESS_TOKEN" "$calls"            || fail "BWS tok
 grep -q "bun add -g" "$calls"                                   || fail "gbrain not installed"
 grep -q "launchctl bootstrap gui/.*gateway-probe" "$calls"      || fail "gateway not bootstrapped"
 grep -q "launchctl start gui/.*gateway-probe" "$calls"          || fail "gateway not started"
-grep -q "verify-fleet --agent Probe" "$calls"                   || fail "verify-fleet not run"
+grep -q "verify-agents --agent Probe" "$calls"                   || fail "verify-agents not run"
 
 # ---- assertion: Honcho is decommissioned — nothing may touch Docker ----
 grep -q "^docker " "$calls" && fail "boot sequence must not call docker (Honcho decommissioned)"

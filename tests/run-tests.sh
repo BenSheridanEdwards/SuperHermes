@@ -64,10 +64,9 @@ if grep -qE 'if (! )?git push -q origin' sync.sh; then bad "rendered script neve
 assert_has "$(cat sync.sh)" 'extraheader=AUTHORIZATION' "rendered script uses HTTPS auth header push"
 assert_has "$(cat sync.sh)" 'GH_TOKEN' "rendered script accepts GH_TOKEN from the environment"
 assert_has "$(cat sync.sh)" 'AGENT_GIT_SYNC_PUSH_APPROVED:-0' "SuperHermes standing default withholds push"
-assert_hasnt "$(cat sync.sh)" 'AGENT_GIT_SYNC_PUSH_APPROVED:-1' "SuperHermes template is not fleet push-on default"
-assert_hasnt "$(cat sync.sh)" '.fleet.env' "SuperHermes template stays free of fleet host paths"
-assert_hasnt "$(cat sync.sh)" '/Users/agents/.hermes/bin/bws' "SuperHermes template stays free of fleet BWS paths"
-assert_has "$(cat sync.sh)" 'Camp-specific secret plumbing' "template documents fleet overlay boundary"
+assert_hasnt "$(cat sync.sh)" 'AGENT_GIT_SYNC_PUSH_APPROVED:-1' "SuperHermes template is not push-on default"
+assert_hasnt "$(cat sync.sh)" '/Users/agents/' "SuperHermes template stays free of machine-specific home paths"
+assert_has "$(cat sync.sh)" 'Camp-specific secret plumbing' "template documents deployment overlay boundary"
 if bash -n sync.sh; then ok "rendered script bash -n clean"; else bad "rendered script bash -n clean"; fi
 mkdir repo; cd repo; git init -q; echo a > f; git add -A; git -c user.name=t -c user.email=t@t commit -qm init
 run(){ AGENT_GIT_ROOT="$T/repo" bash "$T/sync.sh" 2>&1; }
@@ -146,7 +145,7 @@ python3 -m json.tool "$REPO/templates/agent-template.json" >/dev/null 2>&1 \
   && ok "agent template manifest parses" || bad "agent template manifest parses"
 AGENTS_ROOT=""; [ -f "$REPO/superhermes.conf" ] && . "$REPO/superhermes.conf" || . "$REPO/superhermes.conf.example"
 [ -d "${AGENTS_ROOT:-/nonexistent}/TestUnit" ] && bad "dry-run left a real agent dir!" || ok "dry-run leaves no real agent dir"
-# GBrain at birth is Postgres fleet standard (never PGLite / never stale :11534).
+# GBrain at birth is Postgres standard (never PGLite / never stale :11534).
 gcfg="$(cat "$td/TestUnit/.hermes/profiles/testunit/home/.gbrain/config.json" 2>/dev/null)"
 assert_has   "$gcfg" '"engine": "postgres"'              "gbrain config engine is postgres"
 assert_has   "$gcfg" 'postgres://gbrain_testunit@'       "gbrain config database_url uses gbrain_<slug>"
@@ -246,7 +245,7 @@ assert_eq "$rc" "0" "non-scalar rejection leaves config byte-identical"
 rm -rf "$T"
 
 # ---------------------------------------------------------------------------
-section "ensure-gbrain-postgres — config-only writes fleet shape"
+section "ensure-gbrain-postgres — config-only writes standard shape"
 T="$(mktemp -d)"
 python3 "$REPO/bin/ensure-gbrain-postgres" --slug probeagent --agent-root "$T/Probe" \
   --profile-home "$T/Probe/.hermes/profiles/probeagent/home" --config-only >/dev/null
@@ -256,7 +255,7 @@ assert_has "$gcfg" 'gbrain_probeagent' "ensure-gbrain-postgres db id is gbrain_<
 assert_has "$gcfg" '11434/v1' "ensure-gbrain-postgres embed :11434/v1"
 assert_hasnt "$gcfg" 'pglite' "ensure-gbrain-postgres never pglite"
 rm -rf "$T"
-# Client-scoped identity must match Fleet gbrain_<client>_<slug>
+# Client-scoped identity must match gbrain_<client>_<slug>
 T="$(mktemp -d)"
 python3 "$REPO/bin/ensure-gbrain-postgres" --slug hunter --client-id jake \
   --agent-root "$T/Clients/Jake/Hunter" \

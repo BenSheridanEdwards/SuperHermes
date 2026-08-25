@@ -1,12 +1,12 @@
 # SuperHermes
 
-**The blueprint for the best version of a
-[Hermes](https://github.com/NousResearch/hermes) agent: one command births a
-complete, self-contained agent with its own home, persistent memory, sandbox,
-and gateway.**
+**The template for the best version of a
+[Hermes](https://github.com/NousResearch/hermes) agent. One command births a
+complete, self-contained agent: its own home, persistent memory, hardened
+sandbox, and an always-on gateway.**
 
-Every agent gets its own home, its own persistent memory (GBrain), a
-hardened "town-square" sandbox, and a launchd-managed gateway — and
+An agent built from this template gets its own home, its own persistent memory
+(GBrain), a hardened "town-square" sandbox, and a launchd-managed gateway.
 `new-agent` builds one **correct from day one**, in a single command.
 
 ```sh
@@ -18,18 +18,18 @@ bin/new-agent --name Sky --camp personal
 > durable **decisions** behind it — each with the failure it prevents — live in
 > **[ARCHITECTURE.md](ARCHITECTURE.md)**.
 
-## Not a fleet
+## A template, not a platform
 
-SuperHermes defines a single, ideal agent. It is deliberately
-orchestration-agnostic: nothing here knows about any fleet, and the litmus test
-for what belongs is "would a lone agent need it?"
+SuperHermes defines one thing: a single, ideal Hermes agent. It is open-source
+infrastructure with no knowledge of any orchestration platform, dashboard, or
+company. The litmus test for what belongs here: **would a lone agent on a fresh
+Mac need it?**
 
-Orchestration layers sit **above** this blueprint and consume it as a package
-(npm: `superhermes`). They overlay their own plumbing after scaffold: gateway
-launchers (`GATEWAY_LAUNCHER` in `superhermes.conf`), secret distribution,
-health probes, shared skills libraries, roster membership. One example of such
-a layer is F.L.E.E.T., which depends on this package; SuperHermes does not
-depend on it, or on any fleet.
+Everything machine- or operator-specific lives in one gitignored file,
+`superhermes.conf` (gateway launcher, secrets env file, Postgres admin role,
+skills library path). Platforms that manage many agents install this template
+as a package (npm: `superhermes`), point that config at their own plumbing, and
+layer the rest on top. Nothing flows the other way.
 
 ---
 
@@ -47,7 +47,7 @@ It's meant to feel like welcoming someone, not provisioning a server:
 4. **It's live.** The gateway is up, memory is wired and verified, and it's
    reachable. Rocking and rolling.
 
-The framework does the mechanical 95%; you do the 5% that should stay human —
+The template does the mechanical 95%; you do the 5% that should stay human —
 identity and trust.
 
 ---
@@ -74,14 +74,14 @@ place; private things live in the agent's own home. Nothing in between.
 
 ---
 
-## Scope — one agent, not a fleet manager
+## Scope — one agent, built completely
 
-SuperHermes builds **one excellent agent**, correct and self-contained. It is
-deliberately *not* a fleet manager — spawning agents, self-healing, a fleet
-"doctor," cross-agent orchestration all sit in a **separate layer above** the
-individual agent. Keeping that boundary clean is exactly what lets the template
-stay individual- and fleet-agnostic (and open-sourceable). The fleet layer is its
-own system.
+SuperHermes builds **one excellent agent**, correct and self-contained, and
+stops there. Spawning agents in bulk, self-healing, health dashboards, and
+cross-agent orchestration all belong to a **separate layer above** the
+individual agent. Keeping that boundary clean is exactly what keeps this
+template small, portable, and open source. You can run one agent from it, or
+twelve side by side; the template neither knows nor cares.
 
 ---
 
@@ -99,7 +99,7 @@ into another's home.
 Enforced by macOS `sandbox-exec`, **allow-default-then-deny** (not a brittle
 allowlist, so PTYs / temp / Docker / browsers never break). The agent can use
 normal macOS, browser, GPU, app, temp, and runtime paths. It is **not** confined
-to `/Users/agents`.
+to its own root.
 
 The file sandbox enforces only these boundaries:
 
@@ -126,8 +126,12 @@ stays down only when it is **explicitly** shut down (`launchctl bootout`); a cle
 process exit alone is respawned, so an internal restart-drain recovers itself. Do
 **not** use the `{SuccessfulExit: false}` restart-policy dict — it honours any clean
 exit, so a gateway that exits cleanly intending to restart gets stranded (an outage
-mode the fleet hit). Reload with `launchctl kickstart -k` (config change) or
+mode seen in production). Reload with `launchctl kickstart -k` (config change) or
 `bootout`+`bootstrap` (plist change).
+
+The plist executes the launcher named by `GATEWAY_LAUNCHER` in
+`superhermes.conf` — how a gateway boots (env loading, secret injection,
+logging) is operator plumbing, deliberately outside the template.
 
 ### 4. Memory — two durable layers, each verified separately
 - **Bootstrap** — small, always-loaded `MEMORY.md` + `USER.md`. High-signal, tiny.
@@ -140,7 +144,7 @@ mode the fleet hit). Reload with `launchctl kickstart -k` (config change) or
     Postgres) with 768-dim `nomic-embed-text` embeddings. Never SQLite.
   - **Access:** the agent's **own** `<agent>/.local/bin/gbrain` wrapper (pins
     `HOME`/`HERMES_HOME`/`BUN_INSTALL` and `OLLAMA_BASE_URL=…:11434/v1`
-    (deployments may override; e.g. a fleet-specific port)).
+    (deployments may override)).
   - `config.json`, the MCP command, and the CLI wrapper **all resolve to one
     store** — this is what prevents the classic CLI↔MCP split-brain.
 
@@ -175,7 +179,7 @@ Scheduled work may **draft, summarize, inspect, prepare, recommend**. It may nev
 
 ## Secrets — declare the keys, choose the backend
 
-The framework declares the **keys** an agent needs (`TELEGRAM_BOT_TOKEN`, GitHub,
+The template declares the **keys** an agent needs (`TELEGRAM_BOT_TOKEN`, GitHub,
 Google…) and stays **backend-agnostic** about where the values come from:
 
 - **`.env`** (default) — paste values into the gitignored profile `.env`.
@@ -184,7 +188,7 @@ Google…) and stays **backend-agnostic** about where the values come from:
   CLI, stores your access token, picks the project, and tests a fetch.
 
 No secrets backend is ever hardcoded — a solo operator with a plain `.env` and a
-fleet centralising on BitWarden run the *same* framework, no fork.
+deployment centralising on BitWarden run the *same* template, no fork.
 
 ---
 
@@ -205,10 +209,10 @@ An agent is "ideal" only if **all** of these hold:
    config parses.
 7. **Each agent its own git repo** at its root, with a normalised default-deny
    `.gitignore` — only durable identity versioned; never secrets, caches, the
-   GBrain store, the vault, or workspace clones.
+   GBrain store, or workspace clones.
 
-`bin/verify-fleet` asserts all of these across a live fleet in one pass; the
-`tests/` suite locks down the shipping scripts.
+`bin/verify-agents` asserts all of these across every agent under `AGENTS_ROOT`
+in one pass; the `tests/` suite locks down the shipping scripts.
 
 ---
 
@@ -226,8 +230,8 @@ bin/new-agent --name Sky --provider xai-oauth --model grok-4.3 \
 gateway's `fallback_providers` failover chain), and whether to **round-robin** each
 provider's API keys (`credential_pool_strategies`) — defaults shown in `[brackets]`,
 never hidden. Cloning a reference agent (`REF_AGENT`) defaults them to that agent's
-model. The model stays **operator-choice and fleet-agnostic**: fleet defaults (e.g.
-a house provider) are layered on top by the fleet, not baked in here.
+model. The model stays **operator-choice**: house defaults (e.g. a preferred
+provider) are layered on top by your deployment, not baked in here.
 
 The phases: directory skeleton → town-square sandbox (compile-checked) → Hermes
 profile (`config.yaml`, **SOUL seed**, MEMORY/USER, **`.env` secret
@@ -240,10 +244,9 @@ keys**, **memory-maintenance + git-sync crons** (+ their scripts), **normalised 
 Each agent is its **own git repo, rooted at `AGENTS_ROOT/<Name>/`**, with a
 **normalised** (not centralised) default-deny `.gitignore`: every agent follows
 the same standard, each keeps its own copy. Only the durable identity is versioned
-— config, soul, memory, crons, scripts, sandbox profile, README — never secrets,
-caches, the GBrain store, the knowledge vault (its own repo), or
-workspace clones. A new kind of secret file *cannot* leak: if it isn't allow-listed,
-it's ignored.
+— config, soul, memory, skills, vault, crons, scripts, sandbox profile, README —
+never secrets, caches, the GBrain store, or workspace clones. A new kind of secret
+file *cannot* leak: if it isn't allow-listed, it's ignored.
 
 **What it can't autogenerate** (it scaffolds the structure and pauses for the
 values): **secrets** (`<profile>/.env` — Telegram token from
@@ -252,19 +255,19 @@ agent's **`SOUL.md`** persona.
 
 ## Verify & test
 
-Two guards keep the framework honest — most real-world breakage is config /
+Two guards keep the template honest — most real-world breakage is config /
 cross-reference drift, not logic bugs, so both are cheap and high-leverage:
 
 ```sh
-bin/verify-fleet            # assert invariants across every agent (no-LLM, exit 1 on FAIL)
+bin/verify-agents           # assert invariants across every agent (no-LLM, exit 1 on FAIL)
 bash tests/run-tests.sh     # unit-test the shipping scripts (gitignore, git-sync, scaffolder)
 ```
 
-`verify-fleet` checks: cron scripts all exist · no stale shared-wrapper or
+`verify-agents` checks: cron scripts all exist · no stale shared-wrapper or
 retired-system refs · no secrets/bloat tracked in git · normalised `.gitignore` ·
 profile-isolated GBrain · consistent config versions · baseline crons present.
-Run it after any change, and ideally on a daily cron — it's the "diagnose" half of
-fleet ops.
+Run it after any change, and ideally on a daily cron — it's the "diagnose" half
+of operating agents.
 
 ## On-disk layout
 
@@ -291,8 +294,15 @@ AGENTS_ROOT/<Name>/                    ← the agent's own git repo root
 
 ## Requirements
 macOS (`sandbox-exec` + launchd) · a shared Hermes checkout + Python venv the
-deployment provides (not per-agent installs) · Bun (GBrain) · Ollama (local
+operator provides (not per-agent installs) · Bun (GBrain) · Ollama (local
 embeddings) · Python 3, `bash`.
+
+## Install
+
+```sh
+npm install -g superhermes      # bins: superhermes-new-agent, superhermes-verify-agents, …
+# or clone the repo and run bin/ directly
+```
 
 ## Documentation
 
@@ -303,13 +313,12 @@ The README is the overview; these go deeper:
 | [docs/building-agents.md](docs/building-agents.md) | profile layout, config baseline, toolsets & risk model, and the `new-agent` scaffolder |
 | [docs/operations.md](docs/operations.md) | cron & approval gates, operator modules, and housekeeping |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | the durable *why* behind every decision |
-| [examples/](examples/) | worked rundowns from a live agent (Jeeves) |
 
 ## Contributing
 
 Contributions that keep it simple and portable are welcome — see
 [CONTRIBUTING.md](CONTRIBUTING.md). The one rule: no secrets, no machine-specific
-paths, nothing that hardcodes a single fleet, agent, or operator.
+paths, nothing that hardcodes a single deployment, agent, or operator.
 
 ## License
 MIT — see [LICENSE](LICENSE).

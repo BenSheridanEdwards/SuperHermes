@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ensure-gbrain-postgres — fleet-standard GBrain store at agent birth.
+"""ensure-gbrain-postgres — standard GBrain store at agent birth.
 
 Hard cut (Chief 2026-07-22): new agents get Postgres, not PGLite.
 
@@ -34,10 +34,9 @@ DEFAULT_EMBED_URL = "http://127.0.0.1:11434/v1"
 DEFAULT_EMBED_MODEL = "ollama:nomic-embed-text:latest"
 DEFAULT_SCHEMA = "gbrain-base-v2"
 DEFAULT_ADMIN_CANDIDATES = (
-    os.environ.get("FLEET_GBRAIN_ADMIN_URL") or "",
-    "postgres://gbrain_wukong@localhost:5432/postgres",
-    "postgres://gbrain_jeeves@localhost:5432/postgres",
-    "postgres://gbrain_iris@localhost:5432/postgres",
+    os.environ.get("GBRAIN_ADMIN_URL") or "",
+    "postgres://postgres@localhost:5432/postgres",
+    f"postgres://{os.environ.get('USER', '')}@localhost:5432/postgres",
 )
 
 
@@ -47,7 +46,7 @@ def die(msg: str, code: int = 2) -> None:
 
 
 def normalize_identity(slug: str, client_id: str | None = None) -> str:
-    """Match Fleet monitoring gbrain_database_identity for self-scoped agents."""
+    """Match the gbrain_database_identity convention for self-scoped agents."""
     source = f"{client_id}_{slug}" if client_id else slug
     normalized = re.sub(r"[^a-z0-9_]", "_", source.lower())
     candidate = f"gbrain_{normalized}"
@@ -110,7 +109,7 @@ def pick_admin(explicit: str | None) -> str | None:
 
 
 def provision_db(admin_url: str, db_id: str) -> None:
-    # Superuser + BYPASSRLS matches live fleet cutover recipe.
+    # Superuser + BYPASSRLS matches the live cutover recipe.
     role_sql = f"""
 DO $$
 BEGIN
@@ -169,7 +168,7 @@ def main() -> None:
     if not admin:
         die(
             "no working admin Postgres URL "
-            "(set FLEET_GBRAIN_ADMIN_URL or ensure gbrain_wukong can connect)",
+            "(set GBRAIN_ADMIN_URL or ensure a local Postgres admin role can connect)",
             3,
         )
     provision_db(admin, db_id)

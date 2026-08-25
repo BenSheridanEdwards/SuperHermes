@@ -29,27 +29,27 @@ that keep it simple and portable are very welcome.
    ```
 5. Open a PR describing what changed and how you verified it.
 
-## Verifying a live fleet
+## Verifying live agents
 
-`bin/verify-fleet` asserts the framework's invariants across every agent under
-`AGENTS_ROOT` — fast, no-LLM, stdlib-only. It's the "diagnose" half of fleet
+`bin/verify-agents` asserts the framework's invariants across every agent under
+`AGENTS_ROOT` — fast, no-LLM, stdlib-only. It's the "diagnose" half of
 ops: cron scripts all exist, no stale shared-wrapper or retired-system refs, no
 secrets/bloat tracked in git, normalised `.gitignore`, profile-isolated GBrain,
 consistent config versions, baseline crons present.
 
 ```sh
-bin/verify-fleet               # all agents · exit 1 on any FAIL
-bin/verify-fleet --agent Sky   # one agent
-bin/verify-fleet --quiet       # only WARN/FAIL + summary
+bin/verify-agents               # all agents · exit 1 on any FAIL
+bin/verify-agents --agent Sky   # one agent
+bin/verify-agents --quiet       # only WARN/FAIL + summary
 ```
 
-Run it after any change to a live fleet (and ideally on a daily cron) — most
+Run it after any change to live agents (and ideally on a daily cron) — most
 real-world drift is config / cross-reference, exactly what it catches.
 
 ## Scope
 
 Good fits: portability fixes, new template options, better health checks, docs.
-Out of scope: anything that hardcodes a specific fleet, agent, or operator.
+Out of scope: anything that hardcodes a specific deployment, agent, or operator.
 
 ## Reporting issues
 

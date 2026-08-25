@@ -1,27 +1,27 @@
 #!/usr/bin/env python3
 # ============================================================================
-# verify-fleet — assert SuperHermes invariants across every agent in a fleet.
+# verify-agents — assert SuperHermes invariants across every agent under AGENTS_ROOT.
 #
 # Fast, no-LLM, no third-party deps (stdlib only). Discovers agents under
 # AGENTS_ROOT and checks the invariants the framework depends on. Most of the
-# bugs a hand-built fleet accumulates are config / cross-reference drift, not
+# bugs hand-built agents accumulate are config / cross-reference drift, not
 # logic bugs — this catches that whole class in one pass.
 #
 # Exit code: 0 = all checks pass (warnings allowed), 1 = one or more FAILs.
 #
 # Usage:
-#   verify-fleet                 # all agents under AGENTS_ROOT
-#   verify-fleet --agent Iris    # one agent
-#   verify-fleet --root /path    # override AGENTS_ROOT
-#   verify-fleet --quiet         # only WARN/FAIL lines + summary
+#   verify-agents                 # all agents under AGENTS_ROOT
+#   verify-agents --agent Iris    # one agent
+#   verify-agents --root /path    # override AGENTS_ROOT
+#   verify-agents --quiet         # only WARN/FAIL lines + summary
 #
 # AGENTS_ROOT resolves from: --root → $AGENTS_ROOT → superhermes.conf(.example).
 #
 # Store checks are engine-aware (per-agent gbrain config.json decides): a
-# postgres engine asserts database_url reachability + fleet-wide db isolation;
+# postgres engine asserts database_url reachability + cross-agent db isolation;
 # a pglite engine asserts the store lives inside the agent's own profile.
 # RUNTIME_CONTRACT_STATE (env or superhermes.conf) optionally points at the
-# fleet reconciler's state JSON; when set, each agent must be enrolled and
+# runtime reconciler's state JSON; when set, each agent must be enrolled and
 # healthy there. Unset (lone agent, no reconciler) skips those checks.
 # ============================================================================
 import argparse, json, os, re, socket, subprocess, sys, plistlib
@@ -30,10 +30,10 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 # gbrain binary version per agent, collected during the per-agent pass and
-# asserted for consistency in the cross-fleet section.
+# asserted for consistency in the cross-agent section.
 GBRAIN_VERSIONS = {}
 # gbrain store identity (host, port, dbname) per agent — asserted distinct in
-# the cross-fleet section (per-agent isolation on a shared postgres server).
+# the cross-agent section (per-agent isolation on a shared postgres server).
 STORE_IDS = {}
 
 C = {"P": "\033[32m", "W": "\033[33m", "F": "\033[31m", "H": "\033[36m", "D": "\033[2m", "x": "\033[0m"}
@@ -110,12 +110,12 @@ def resolve_root(args, repo):
     v = conf_value(repo, "AGENTS_ROOT")
     if v:
         return Path(v)
-    sys.exit("verify-fleet: cannot resolve AGENTS_ROOT (use --root, $AGENTS_ROOT, or superhermes.conf)")
+    sys.exit("verify-agents: cannot resolve AGENTS_ROOT (use --root, $AGENTS_ROOT, or superhermes.conf)")
 
 
 def load_contract_state(repo):
     """Optional runtime-contract enrollment state: a JSON file written by the
-    fleet's runtime reconciler mapping agent ids → {incident, healthy_at}.
+    deployment's runtime reconciler mapping agent ids → {incident, healthy_at}.
     Configured via $RUNTIME_CONTRACT_STATE or superhermes.conf; a lone agent
     (no reconciler) leaves it unset and the enrollment checks are skipped."""
     path = os.environ.get("RUNTIME_CONTRACT_STATE") or conf_value(repo, "RUNTIME_CONTRACT_STATE")
@@ -134,7 +134,7 @@ def load_contract_state(repo):
 def discover_agents(root):
     out = []
     if not root.is_dir():
-        sys.exit(f"verify-fleet: AGENTS_ROOT not a directory: {root}")
+        sys.exit(f"verify-agents: AGENTS_ROOT not a directory: {root}")
     for d in sorted(root.iterdir()):
         if not d.is_dir() or d.name.startswith((".", "_")) or d.name == "Shared":
             continue
@@ -197,7 +197,7 @@ def check_agent(name, slug, root, rpt, config_versions, contract_agents):
             if engine == "postgres":
                 # store contract: an explicit per-agent database_url whose
                 # server answers. Isolation (distinct db per agent) is asserted
-                # fleet-wide once all agents are collected.
+                # across all agents once collected.
                 db_url = gc.get("database_url") or gc.get("databaseUrl") or ""
                 u = urlparse(db_url) if db_url else None
                 if not db_url or not u.hostname:
@@ -220,7 +220,7 @@ def check_agent(name, slug, root, rpt, config_versions, contract_agents):
                     rpt.line("F", name, "GBrain store path", f"not profile-isolated: {db}")
                 else:
                     rpt.line("P", name, "GBrain store profile-isolated")
-            # embedding endpoint must be the OpenAI-compatible /v1 base (fleet canon)
+            # embedding endpoint must be the OpenAI-compatible /v1 base (canon)
             eb = (gc.get("embedding_base_url", "") or "").rstrip("/")
             rpt.line("P" if eb.endswith("/v1") else "F", name,
                      "GBrain embedding_base_url is /v1",
@@ -259,7 +259,7 @@ def check_agent(name, slug, root, rpt, config_versions, contract_agents):
         except subprocess.TimeoutExpired:
             rpt.line("W", name, "GBrain brain opens", "timeout opening store")
 
-    # 2d. record gbrain binary version for the cross-fleet drift check
+    # 2d. record gbrain binary version for the cross-agent drift check
     if wrap.exists() and os.access(wrap, os.X_OK):
         try:
             v = subprocess.run([str(wrap), "--version"], text=True,
@@ -404,7 +404,7 @@ def check_agent(name, slug, root, rpt, config_versions, contract_agents):
             else:
                 rpt.line("P", name, "runtime-contract enrolled + healthy")
 
-    # 8. config version (collect for cross-fleet consistency check)
+    # 8. config version (collect for cross-agent consistency check)
     conf = profile / "config.yaml"
     if conf.exists():
         m = re.search(r"_config_version:\s*(\d+)", conf.read_text())
@@ -417,7 +417,7 @@ def check_agent(name, slug, root, rpt, config_versions, contract_agents):
     if plist.exists():
         try:
             ka = plistlib.loads(plist.read_bytes()).get("KeepAlive")
-            # Fleet standard: KeepAlive must be literal `true` (always restart).
+            # Standard: KeepAlive must be literal `true` (always restart).
             # A restart-policy dict like {SuccessfulExit: false} only respawns on a
             # *failed* exit, so a graceful/clean shutdown (e.g. an internal
             # restart_requested drain) strands the gateway: launchd honours the
@@ -433,7 +433,7 @@ def check_agent(name, slug, root, rpt, config_versions, contract_agents):
 
 def main():
     global QUIET
-    ap = argparse.ArgumentParser(description="Verify SuperHermes invariants across a fleet.")
+    ap = argparse.ArgumentParser(description="Verify SuperHermes invariants across every agent.")
     ap.add_argument("--root"); ap.add_argument("--agent"); ap.add_argument("--quiet", action="store_true")
     args = ap.parse_args()
     QUIET = args.quiet
@@ -443,24 +443,24 @@ def main():
     if args.agent:
         agents = [a for a in agents if a[0].lower() == args.agent.lower()]
         if not agents:
-            sys.exit(f"verify-fleet: agent '{args.agent}' not found under {root}")
+            sys.exit(f"verify-agents: agent '{args.agent}' not found under {root}")
 
     contract_agents, contract_err = load_contract_state(repo)
 
-    print(f"{C['H']}SuperHermes fleet check{C['x']}  root={root}  agents={len(agents)}")
+    print(f"{C['H']}SuperHermes agent check{C['x']}  root={root}  agents={len(agents)}")
     rpt = Report()
     config_versions = {}
     for name, slug, droot in agents:
         check_agent(name, slug, droot, rpt, config_versions, contract_agents)
 
-    # cross-fleet: config version consistency
-    print(f"\n{C['H']}━━ fleet-wide ━━{C['x']}")
+    # cross-agent: config version consistency
+    print(f"\n{C['H']}━━ cross-agent ━━{C['x']}")
     if contract_err:
         rpt.line("F", "*", "runtime-contract state file", contract_err)
     elif contract_agents is None:
         print(f"  {C['D']}runtime-contract: not configured (RUNTIME_CONTRACT_STATE) — enrollment checks skipped{C['x']}")
 
-    # cross-fleet: postgres store isolation — no two agents may share a database
+    # cross-agent: postgres store isolation — no two agents may share a database
     dup = {}
     for a, sid in STORE_IDS.items():
         dup.setdefault(sid, []).append(a)
@@ -476,15 +476,15 @@ def main():
         rpt.line("P", "*", f"config versions consistent ({', '.join(vers) or 'n/a'})")
     else:
         detail = ", ".join(f"{a}={v}" for a, v in sorted(config_versions.items()))
-        rpt.line("F", "*", "config versions consistent across fleet", f"DRIFT: {detail}")
+        rpt.line("F", "*", "config versions consistent across agents", f"DRIFT: {detail}")
 
-    # cross-fleet: gbrain binary version consistency
+    # cross-agent: gbrain binary version consistency
     gv = {v for v in GBRAIN_VERSIONS.values() if v not in ("?", "ERR")}
     if len(gv) <= 1:
         rpt.line("P", "*", f"gbrain binary versions consistent ({', '.join(gv) or 'n/a'})")
     else:
         detail = ", ".join(f"{a}={v}" for a, v in sorted(GBRAIN_VERSIONS.items()))
-        rpt.line("W", "*", "gbrain binary versions consistent across fleet", f"DRIFT: {detail}")
+        rpt.line("W", "*", "gbrain binary versions consistent across agents", f"DRIFT: {detail}")
 
     print(f"\n{C['H']}Summary{C['x']}  "
           f"{C['P']}{rpt.passes} pass{C['x']}  {C['W']}{rpt.warns} warn{C['x']}  {C['F']}{rpt.fails} fail{C['x']}")
