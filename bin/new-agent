@@ -24,7 +24,9 @@
 # ============================================================================
 set -euo pipefail
 
-REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Resolve through symlinks so an npm bin shim (node_modules/.bin/*) still finds
+# the package root that holds templates/ and lib/.
+REPO="$(cd "$(dirname "$(python3 -c 'import os,sys;print(os.path.realpath(sys.argv[1]))' "${BASH_SOURCE[0]}")")/.." && pwd)"
 
 die(){ printf '\033[31merror:\033[0m %s\n' "$*" >&2; exit 1; }
 say(){ printf '\033[36m%s\033[0m\n' "$*"; }
@@ -354,7 +356,7 @@ cat > "$LA/ai.hermes.gateway-$SLUG.plist" <<PLIST
   <key>Label</key><string>ai.hermes.gateway-$SLUG</string>
   <key>ProgramArguments</key><array>
     <string>/usr/bin/sandbox-exec</string><string>-f</string><string>$AGENT_ROOT/.hermes/sandbox/$SLUG.sb</string>
-    <string>/Users/agents/Agents/Shared/bin/hermes-gateway-launch</string>
+    <string>/Users/agents/.fleet/bin/hermes-gateway-launch</string>
     <string>$SLUG</string><string>$PROFILE</string>
   </array>
   <key>WorkingDirectory</key><string>$AGENT_ROOT/workspace</string>

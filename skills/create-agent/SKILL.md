@@ -21,7 +21,7 @@ above, and keeping it out is what lets this stay open-source and fleet-agnostic.
 > (0 fail). Output = a self-contained agent at `AGENTS_ROOT/<Name>/` with a running
 > gateway and GBrain. Memory is GBrain only. NOT yet a fleet member.
 
-`REPO` below = the SuperHermes checkout (e.g. `/Users/agents/Agents/Shared/SuperHermes`).
+`REPO` below = the SuperHermes checkout (e.g. `/Users/agents/Projects/Fleet/shared/SuperHermes`).
 
 ## 1. Preflight (don't skip — the scaffolder assumes these)
 - `superhermes.conf` exists (copy from `.example`) with `AGENTS_ROOT` + sandbox
