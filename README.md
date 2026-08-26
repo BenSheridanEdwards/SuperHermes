@@ -31,6 +31,22 @@ skills library path). Platforms that manage many agents install this template
 as a package (npm: `superhermes`), point that config at their own plumbing, and
 layer the rest on top. Nothing flows the other way.
 
+```mermaid
+flowchart TB
+    launchd["launchd (KeepAlive: true)"] --> launcher["your gateway launcher
+(GATEWAY_LAUNCHER)"]
+    launcher --> sb["town-square sandbox"]
+    sb --> gw["Hermes gateway"]
+    subgraph home["AGENTS_ROOT/&lt;Name&gt;/ — its own git repo"]
+        gw --> soul["SOUL.md + MEMORY/USER"]
+        gw -- MCP --> store[("GBrain
+Postgres store")]
+        brain["vault/brain/
+(scaffolded taxonomy)"] -- "autosync 30m" --> store
+        crons["4 baseline crons"] --> brain
+    end
+```
+
 ---
 
 ## Creating an agent — the experience
@@ -185,6 +201,15 @@ each copy it.
 Scheduled work may **draft, summarize, inspect, prepare, recommend**. It may never
 **send, post, buy, delete, or change credentials** without explicit human approval
 (`approvals.cron_mode: deny`).
+
+### 7. The chat experience — stream the answer, hide the machinery
+In chat channels the agent streams its real reply and notifies on long-running
+work, while tool chatter stays off and progress bubbles are cleaned up after
+the turn (`display.platforms.telegram`). The SOUL seed pairs it with the
+operating style that makes the channel feel like a capable colleague: be
+proactive, take tasks as far as possible alone, and come back with solutions —
+context, work done, recommendation — not problems. See decision 15 in
+[ARCHITECTURE.md](ARCHITECTURE.md).
 
 ---
 

@@ -132,11 +132,15 @@ text = open(sys.argv[1]).read()
 print("AUX_OK" if "__AUX_PROVIDER__" not in text and "auxiliary:" in text else "AUX_BAD")
 print("BWS_OK" if "__BWS_" not in text else "BWS_BAD")
 print("DENY_OK" if "csrutil disable" in text else "DENY_BAD")
+print("CHAT_OK" if "cleanup_progress: true" in text and "tool_progress: false" in text and "rich_messages: true" in text else "CHAT_BAD")
+print("PIN_OK" if "HERMES_HOME:" in text and "connect_timeout: 60" in text else "PIN_BAD")
 PY
 )"
 assert_has "$cfgchk" "AUX_OK" "config renders auxiliary routing with substituted models"
 assert_has "$cfgchk" "BWS_OK" "secrets manager stays disabled without an operator project id"
 assert_has "$cfgchk" "DENY_OK" "config carries the hardline deny floor"
+assert_has "$cfgchk" "CHAT_OK" "config carries the chat-experience display block"
+assert_has "$cfgchk" "PIN_OK" "gbrain MCP block pins profile env like the wrapper"
 pl="$(cat "$td/LaunchAgents/ai.hermes.gateway-testunit.plist" 2>/dev/null)"
 assert_has "$pl" "hermes-gateway-launch" "gateway plist launches via the operator's gateway launcher"
 assert_hasnt "$pl" "hermes_cli.main"                "gateway plist does not bypass shared launcher"
