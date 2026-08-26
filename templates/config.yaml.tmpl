@@ -18,6 +18,7 @@ agent:
   gateway_timeout_warning: 1800
   gateway_notify_interval: 300
   restart_drain_timeout: 180
+  restart_after_turn_timeout: 21600
   api_max_retries: 5
   reasoning_effort: medium
   tool_use_enforcement: auto
@@ -25,16 +26,28 @@ agent:
 goals:
   max_turns: 80
 
+# The chat experience: stream the real answer, hide the machinery. Tool spam
+# off, progress bubbles cleaned up after the turn, interim thoughts allowed in
+# chat (they read as the agent talking) but not in the terminal.
 display:
   busy_input_mode: steer
   interim_assistant_messages: false
   show_reasoning: false
+  platforms:
+    telegram:
+      streaming: true
+      tool_progress: false
+      long_running_notifications: true
+      busy_ack_detail: false
+      cleanup_progress: true
+      interim_assistant_messages: true
 
 terminal:
   backend: local
   modal_mode: auto
   cwd: __WORKSPACE_CWD__
   timeout: 600
+  home_mode: profile
 
 memory:
   memory_enabled: true
@@ -59,6 +72,7 @@ context:
 # cheap, high-volume roles (compression, title_generation, session_search) at a
 # small model so they stop burning primary-model quota.
 auxiliary:
+  transient_retries: 2
   vision:
     provider: __AUX_PROVIDER__
     model: __AUX_MODEL__
@@ -78,6 +92,7 @@ auxiliary:
     provider: __AUX_PROVIDER__
     model: __AUX_MODEL__
   title_generation:
+    enabled: true
     provider: __AUX_PROVIDER__
     model: __AUX_MODEL__
     timeout: 120
@@ -101,6 +116,7 @@ delegation:
   child_timeout_seconds: 3600
   max_concurrent_children: 4
   subagent_auto_approve: false
+  fallback_policy: inherit_then_parent
 
 skills:
   external_dirs:
@@ -112,6 +128,7 @@ skills:
 curator:
   stale_after_days: 7
   archive_after_days: 14
+  prune_builtins: true
 
 sessions:
   auto_archive: true          # archive (reversible) — never auto-DELETE sessions
@@ -169,6 +186,7 @@ cron:
 computer_use:
   background_only: true
   no_overlay: true
+  cua_telemetry: false
 
 # Anti-loop safety: warn when a tool keeps failing the same way.
 tool_loop_guardrails:
@@ -225,6 +243,26 @@ streaming:
   enabled: true
   fresh_final_after_seconds: 60.0
 
+gateway:
+  loop_watchdog: true
+
+# Messaging. new-agent disables telegram until a bot token exists in the
+# profile .env; these are the proven experience settings for when it's on.
+telegram:
+  enabled: true
+  gateway_restart_notification: false
+  extra:
+    rich_messages: true
+
+# Voice (optional): pick a tts/stt provider, then auto_tts speaks replies to
+# voice notes. Uncomment and choose providers to enable.
+# tts:
+#   provider: <your-tts-provider>
+# stt:
+#   provider: <your-stt-provider>
+# voice:
+#   auto_tts: true
+
 logging:
   memory_monitor:
     enabled: true
@@ -262,7 +300,11 @@ mcp_servers:
     args:
       - serve
     enabled: true
+    timeout: 120
+    connect_timeout: 60
     env:
+      HOME: __AGENT_ROOT__/.hermes/profiles/__AGENT_SLUG__/home
+      HERMES_HOME: __AGENT_ROOT__/.hermes/profiles/__AGENT_SLUG__
       OLLAMA_BASE_URL: http://127.0.0.1:11434/v1
 
 # Token-economics telemetry: log-only observer hooks (pre/post API request) that
