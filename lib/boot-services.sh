@@ -18,8 +18,10 @@
 # 0.41.38.0 + stdio-stderr patch (fork of garrytan/gbrain@248fb7a9): routes
 # slog/console progress to stderr under `gbrain serve` so vault-import/embed
 # lines can't corrupt the MCP stdio JSON-RPC channel (was flooding every
-# gateway.error.log with "Failed to parse JSONRPC message"). Upstream PR
-# candidate; repin to upstream once merged.
+# gateway.error.log with "Failed to parse JSONRPC message"). The upstream PR
+# carrying this patch (garrytan/gbrain#3844) was closed without merging, so the
+# fork pin stands until upstream ships an equivalent. Override with GBRAIN_REF
+# to install any other ref, including plain upstream.
 GBRAIN_REF="${GBRAIN_REF:-github:BenSheridanEdwards/gbrain#3eec49b59e4cc91552b8212243438f5a98b7361f}"
 DISK_FLOOR_GB="${DISK_FLOOR_GB:-25}"
 

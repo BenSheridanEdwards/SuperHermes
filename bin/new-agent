@@ -155,7 +155,7 @@ fi
 OTHER_USER_HOME_RULES=""
 for d in /Users/*; do
   [ -d "$d" ] || continue
-  [ "$d" = "${HOME:-/Users/agents}" ] && continue
+  [ "$d" = "${HOME:-/nonexistent}" ] && continue
   [ "$d" = "/Users/Shared" ] && continue
   OTHER_USER_HOME_RULES+="(deny file* (literal \"$d\"))"$'\n'
   OTHER_USER_HOME_RULES+="(deny file* (subpath \"$d\"))"$'\n'

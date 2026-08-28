@@ -55,6 +55,18 @@ for deny in .env auth.json google_token.json workspace/ honcho/honcho .pglite; d
 cd "$REPO"; rm -rf "$T"
 
 # ---------------------------------------------------------------------------
+# Everything in the npm tarball is read by strangers on their own machines, and
+# a leaked home path or employer name cannot be recalled once published. This
+# scans the whole package.json `files` surface, not just one rendered template.
+section "published surface — no operator identity in anything we ship"
+pub="$(python3 "$REPO/tests/scan-published-surface.py" "$REPO" 2>&1)"
+assert_has "$pub" "CLEAN" "no operator home path or company name in any shipped file"
+pub_count="$(printf '%s\n' "$pub" | sed -n 's/^SHIPPED=//p')"
+[ "${pub_count:-0}" -ge 30 ] \
+  && ok "scan covered the whole shipped surface ($pub_count files)" \
+  || bad "scan covered the whole shipped surface — only ${pub_count:-0} files"
+
+# ---------------------------------------------------------------------------
 section "git-sync.sh — silent success, secret tripwire, no force-push"
 T="$(mktemp -d)"; cd "$T"
 A_ROOT="$T/repo" A_SLUG=test A_NAME=Test render "$REPO/templates/git-sync.sh.tmpl" > sync.sh; chmod +x sync.sh

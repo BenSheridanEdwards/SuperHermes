@@ -4,7 +4,7 @@
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-AGENTS_ROOT="${AGENTS_ROOT:-/Users/agents/Agents}"
+AGENTS_ROOT="${AGENTS_ROOT:-$HOME/Agents}"
 NAME=""
 
 while [ $# -gt 0 ]; do
