@@ -108,12 +108,12 @@ anatomy above — correct from day one.
 
 ```sh
 bin/new-agent                                  # fully interactive
-bin/new-agent --name Sky --camp codewalnut
+bin/new-agent --name Sky --camp work
 bin/new-agent --name Sky --no-start            # scaffold files only
 bin/new-agent --name Sky --dry-run             # render to temp, zero side effects
 ```
 
-Prompts: **name** (PascalCase) · **camp** (`personal`|`codewalnut` → workspace
+Prompts: **name** (PascalCase) · **camp** (e.g. `personal`|`work` → workspace
 suffix) · **model** (primary provider/model, up to two fallbacks, round-robin) ·
 proceed confirm.
 

@@ -9,7 +9,7 @@
 ;; - Do not write in another agent's root under __AGENTS_ROOT__.
 ;;
 ;; This is not a filesystem allowlist and does not confine the agent to
-;; /Users/agents.
+;; its own root.
 
 (allow default)
 
