@@ -1,6 +1,6 @@
 {
   "name": "superhermes",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "The template for the best version of a Hermes agent: one command births a complete, self-contained agent (gateway, GBrain memory, sandbox, launchd, cron) on macOS.",
   "license": "MIT",
   "author": "Ben Sheridan Edwards",
