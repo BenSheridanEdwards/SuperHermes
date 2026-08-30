@@ -132,6 +132,14 @@ for want in vault/brain/HOME.md vault/brain/README.md vault/brain/continuity \
   [ -e "$TU/$want" ] && ok "scaffolds $want" || bad "scaffolds $want"
 done
 assert_has "$(cat "$TU/vault/brain/HOME.md")" "PRIMARY SUBJECT" "brain HOME carries the filing rule"
+# Profile layout must match what `hermes profile create` produces, so a Hermes
+# feature expecting one of these dirs finds it (issue #30). scripts/ is ours.
+for d in plans sessions skins workspace cron logs memories skills; do
+  [ -d "$TU/.hermes/profiles/testunit/$d" ] \
+    && ok "profile has upstream dir $d" || bad "profile has upstream dir $d"
+done
+assert_has "$(cat "$TU/.hermes/profiles/testunit/profile.yaml")" "description_auto: false" \
+  "profile.yaml seeded and pinned against auto-description (issue #31)"
 for scr in gbrain-autosync.sh full-backup.sh; do
   s="$TU/.hermes/profiles/testunit/scripts/$scr"
   [ -x "$s" ] && bash -n "$s" && ok "renders executable $scr (bash -n clean)" || bad "renders executable $scr (bash -n clean)"

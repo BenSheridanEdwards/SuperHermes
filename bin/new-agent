@@ -181,7 +181,9 @@ if [ "$DRYRUN" = 1 ]; then TMP="$(mktemp -d)"; AGENT_ROOT="$TMP/$NAME"; export A
 
 # ---- 1. skeleton ------------------------------------------------------------
 say "1/7  directory skeleton"
-mkdir -p "$PROFILE"/{cron,scripts,logs,memories,home/.gbrain} "$AGENT_ROOT/.hermes/sandbox" \
+# Profile dirs mirror what `hermes profile create` makes, so the layout is
+# upstream's rather than our guess (issue #30). `scripts` is ours, not theirs.
+mkdir -p "$PROFILE"/{cron,scripts,logs,memories,plans,sessions,skins,workspace,home/.gbrain} "$AGENT_ROOT/.hermes/sandbox" \
   "$AGENT_ROOT/.home/.gbrain" \
   "$AGENT_ROOT"/{.cache,.npm,.ollama,tmp} \
   "$AGENT_ROOT/workspace"/{repos,worktrees,artifacts,notes,scratch,tmp} \
@@ -309,6 +311,7 @@ agents, running services), it stays parked on its default branch at all
 times — never \`git switch\`/checkout, commit, or stage work there, and
 never in any checkout you did not create yourself.
 SOUL
+render "$REPO/templates/profile.yaml.tmpl" > "$PROFILE/profile.yaml"
 render "$REPO/templates/EVOLUTION.template.md" > "$PROFILE/EVOLUTION.md"
 render "$REPO/templates/DIARY.template.md" > "$PROFILE/DIARY.md"
 mkdir -p "$PROFILE/skills"
