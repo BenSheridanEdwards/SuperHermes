@@ -1,5 +1,7 @@
 # Contributing to SuperHermes
 
+Before writing or reviewing code, read [coding_standards.md](coding_standards.md). Apply it alongside the existing repository-specific rules; preserve stricter local requirements. These are engineering standards, not a substitute for the product specification.
+
 Thanks for your interest! SuperHermes is a small, focused framework — contributions
 that keep it simple and portable are very welcome.
 
