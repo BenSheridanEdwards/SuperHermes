@@ -549,6 +549,8 @@ echo "KEEP" > "$PROF/scripts/git-sync.sh"
 assert_eq "$(cat "$PROF/scripts/git-sync.sh")" "KEEP" "missing template leaves the existing script untouched"
 cd "$REPO"; rm -rf "$T"
 
+bash "$REPO/tests/boot-services.test.sh" || bad "boot boundary tests"
+
 # ---------------------------------------------------------------------------
 printf '\n\033[36mSummary\033[0m  \033[32m%d pass\033[0m  \033[31m%d fail\033[0m\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
