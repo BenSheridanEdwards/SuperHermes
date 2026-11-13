@@ -12,8 +12,8 @@
 #   NAME SLUG AGENT_ROOT PROFILE LA AGENTS_ROOT REPO
 # Optional: API_PORT (unused; retained only if a caller still exports it)
 #
-# Best-effort per phase. Returns non-zero only on a preflight that makes
-# booting pointless (disk below floor). verify-agents is the green gate.
+# Required phases fail closed: reconciliation, install/seed, launchd and verify.
+# A failed bootstrap is acceptable only when print confirms a loaded service.
 
 # 0.41.38.0 + stdio-stderr patch (fork of garrytan/gbrain@248fb7a9): routes
 # slog/console progress to stderr under `gbrain serve` so vault-import/embed
@@ -55,7 +55,7 @@ render_normalised_scripts() {
 
 boot_agent_services() {
   say "services: re-render normalised scripts"
-  render_normalised_scripts
+  render_normalised_scripts || return 1
   ok "normalised scripts in sync with templates (git-sync.sh, memory_health_snapshot.py, cron_registry_snapshot.py)"
 
   say "services: preflight"
@@ -86,23 +86,26 @@ boot_agent_services() {
   local bun_bin; bun_bin="$(command -v bun 2>/dev/null || true)"
   if [ -n "$bun_bin" ]; then
     ( export HOME="$PROFILE/home" BUN_INSTALL="$PROFILE/home/.bun" XDG_CACHE_HOME="$PROFILE/home/.cache" PATH="/opt/homebrew/bin:$PROFILE/home/.bun/bin:$PATH"
-      mkdir -p "$BUN_INSTALL/bin"; "$bun_bin" add -g "$GBRAIN_REF" >/dev/null 2>&1 ) || warn "gbrain install reported an error"
-    "$AGENT_ROOT/.local/bin/gbrain" import "$AGENT_ROOT/vault/brain" >/dev/null 2>&1 || true
-    "$AGENT_ROOT/.local/bin/gbrain" embed --stale >/dev/null 2>&1 || true
+      mkdir -p "$BUN_INSTALL/bin"; "$bun_bin" add -g "$GBRAIN_REF" >/dev/null 2>&1 ) || { warn "gbrain install reported an error"; return 1; }
+    "$AGENT_ROOT/.local/bin/gbrain" import "$AGENT_ROOT/vault/brain" >/dev/null 2>&1 || return 1
+    "$AGENT_ROOT/.local/bin/gbrain" embed --stale >/dev/null 2>&1 || return 1
     ok "gbrain installed + vault seeded"
   else
-    warn "bun not found — skipping gbrain"
+    warn "bun not found"; return 1
   fi
 
   say "services: launchd + verify"
-  launchctl bootstrap "gui/$(id -u)" "$LA/ai.hermes.gateway-$SLUG.plist" 2>/dev/null || true
-  launchctl enable "gui/$(id -u)/ai.hermes.gateway-$SLUG" 2>/dev/null || true
-  launchctl start "gui/$(id -u)/ai.hermes.gateway-$SLUG" 2>/dev/null || true
+  launchctl bootstrap "gui/$(id -u)" "$LA/ai.hermes.gateway-$SLUG.plist" 2>/dev/null || {
+    launchctl print "gui/$(id -u)/ai.hermes.gateway-$SLUG" >/dev/null 2>&1 || return 1
+  }
+  launchctl enable "gui/$(id -u)/ai.hermes.gateway-$SLUG" 2>/dev/null || return 1
+  launchctl start "gui/$(id -u)/ai.hermes.gateway-$SLUG" 2>/dev/null || return 1
   ok "gateway booted"
   if python3 "$REPO/bin/verify-agents" --agent "$NAME" --quiet 2>/dev/null; then
     ok "verify-agents: $NAME invariants pass"
   else
     warn "verify-agents flagged issues for $NAME (run: $REPO/bin/verify-agents --agent $NAME)"
+    return 1
   fi
 
   return 0

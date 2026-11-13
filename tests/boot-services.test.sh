@@ -78,7 +78,10 @@ run_case() {
 }
 run_case verify_failure_not_ready fail SHIM_EXIT_python3_verify_agents 1 ''
 run_case install_failure_stops_seed fail SHIM_EXIT_bun_add 1 'gbrain (import|embed)'
+export SHIM_EXIT_launchctl_print=1
 run_case bootstrap_failure_stops_start fail SHIM_EXIT_launchctl_bootstrap 1 'launchctl start|verify-agents'
+unset SHIM_EXIT_launchctl_print
+run_case start_failure_not_ready fail SHIM_EXIT_launchctl_start 1 ''
 run_case already_running_ok pass SHIM_EXIT_launchctl_bootstrap 5 ''
 run_case cron_reconcile_failure_fatal fail SHIM_EXIT_python3_cron_registry_snapshot_py 1 ''
 run_case no_secret_in_output pass SHIM_EXIT_bun_add 0 ''
